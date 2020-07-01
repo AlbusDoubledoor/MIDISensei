@@ -1,2 +1,0 @@
-# MIDISensei
-MIDI player
