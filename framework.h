@@ -6,11 +6,15 @@
 
 #include "targetver.h"
 // Файлы заголовков Windows
+#define NOMINMAX
 #include <windows.h>
 #include <commctrl.h>
-#include <string>
 // Файлы заголовков среды выполнения C
 #include <stdlib.h>
+#include <string>
+#include <thread>
 #include <malloc.h>
 #include <memory.h>
 #include <tchar.h>
+// Вспомогательные решения
+#include "midifile.cpp"

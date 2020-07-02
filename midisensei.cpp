@@ -5,7 +5,15 @@
 #include "midisensei.h"
 
 #define MAX_LOADSTRING 100
+
 #define DRUM_CHANNEL 9
+
+#define DEFAULT_TEMPO 500000
+#define DEFAULT_BPM 120
+
+#define MIDI_FORMAT_SINGLE 0
+#define MIDI_FORMAT_SYNC_MULTI 1
+#define MIDI_FORMAT_ASYNC 2
 
 // Глобальные переменные:
 HINSTANCE hInst;                                // текущий экземпляр
@@ -16,6 +24,8 @@ UINT Channel;                    // Номер канала (10 - drums, окт�
 UINT Patch;                   // Номер тембра
 UINT Octave;				  // Октава - 0-10
 HWND DlgWin;                  // Ключ диалогового окна
+MidiFile TargetMidi;		  // Целевой миди-файл
+BOOL targetMidiError;		  // Флаг ошибки загрузки файла
 
 // Константы:
 char KeyToNote[] = "zsxdcvgbhnjmq2w3er5t6y7u"; // Таблица клавиши -> ноты
@@ -239,11 +249,75 @@ int OpenDevices(void) {
 	return TRUE;
 }
 
+BOOL PlaybackFile();
+// Загрузка файла
+BOOL LoadFile(const wchar_t* filename) {
+	std::wstring wFilename = std::wstring(filename);
+	TargetMidi = MidiFile();
+	targetMidiError = FALSE;
+	if (targetMidiError = !TargetMidi.ParseFile(wFilename))
+	{
+		return FALSE;
+	}
+	PlaybackFile();
+	return TRUE;
+}
+
+class PlaybackTrack {
+public:
+	void operator()(const MidiTrack & midiTrk) {
+		long int eventsNum = midiTrk.vecEvents.size();
+		for (long int nEvent = 0; nEvent < eventsNum; nEvent++)
+		{
+			uint32_t sleepTime = midiTrk.vecEvents[nEvent].nDeltaTick;
+			if (sleepTime != 0) {
+				sleepTime = (uint32_t)TargetMidi.m_nTempo/(uint32_t)1000 * sleepTime / (uint32_t)TargetMidi.m_nDivision;
+			}
+			std::this_thread::sleep_for(std::chrono::milliseconds(sleepTime));
+			BYTE nStatus = midiTrk.vecEvents[nEvent].nStatus;
+			BYTE nKey = midiTrk.vecEvents[nEvent].nKey;
+			BYTE nVelocity = midiTrk.vecEvents[nEvent].nVelocity;
+			midiOutShortMsg(Out, (((nVelocity << 8) | nKey) << 8) | nStatus);
+		}
+	}
+};
+
+// Проиграть файл
+BOOL PlaybackFile() {
+	if (targetMidiError) {
+		return FALSE;
+	}
+	CloseDevices();
+	MMRESULT Res = midiOutOpen(&Out, 0, 0, 0, 0);
+	if (Res != MMSYSERR_NOERROR) {
+		Error(L"Невозможно открыть устройство вывода");
+		return FALSE;
+	}
+	if (TargetMidi.m_nTempo == 0)
+		TargetMidi.m_nTempo = DEFAULT_TEMPO;
+	if (TargetMidi.m_nBPM == 0)
+		TargetMidi.m_nBPM = DEFAULT_BPM;
+	int tracksNum = TargetMidi.vecTracks.size();
+	std::vector<std::thread> threads;
+	std::vector<MidiTrack>::iterator track_it;
+	for (track_it = TargetMidi.vecTracks.begin(); track_it != TargetMidi.vecTracks.end(); track_it++) {
+		PlaybackTrack playbackTrackFunction;
+		threads.push_back(std::thread(playbackTrackFunction, (*track_it)));
+	}
+	std::vector<std::thread>::iterator thread_it;
+	for (thread_it = threads.begin(); thread_it != threads.end(); thread_it++) {
+		(*thread_it).join();
+	}
+	CloseDevices();
+	return TRUE;
+}
+
 ATOM                MidiSenseiRegisterClass(HINSTANCE hInstance);
 BOOL                InitInstance(HINSTANCE, int);
 LRESULT CALLBACK    WndProc(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK    About(HWND, UINT, WPARAM, LPARAM);
 BOOL CALLBACK    MidiKeyboard(HWND, UINT, WPARAM, LPARAM);
+BOOL CALLBACK    PlayFileHandler(HWND, UINT, WPARAM, LPARAM);
 
 int APIENTRY wWinMain(HINSTANCE hInstance,
 	HINSTANCE hPrevInstance,
@@ -404,6 +478,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			DlgWin = CreateDialog(hInst, MAKEINTRESOURCE(IDD_KEYBOARDDIALOG), hWnd, MidiKeyboard);
 			ShowWindow(DlgWin, SW_SHOW);
 			break;
+		case IDM_PLAYFILE:
+			DialogBox(hInst, MAKEINTRESOURCE(IDD_PLAYFILEDIALOG), hWnd, PlayFileHandler);
+			break;
 		default:
 			return DefWindowProc(hWnd, message, wParam, lParam);
 		}
@@ -424,6 +501,44 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		return DefWindowProc(hWnd, message, wParam, lParam);
 	}
 	return 0;
+}
+
+// Обработчик сообщений для окна "Играть файл".
+BOOL CALLBACK PlayFileHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
+{
+	UNREFERENCED_PARAMETER(lParam);
+	UINT controlId = LOWORD(wParam);
+	switch (message)
+	{
+	case WM_COMMAND:
+		{
+			switch (controlId) {
+				case IDOK:
+				case IDCANCEL:
+					{
+						EndDialog(hDlg, LOWORD(wParam));
+						return TRUE;
+					}
+					break;
+				case IDC_LOADFILE_BUTTON:
+					{
+						HWND fnHandle = GetDlgItem(hDlg, IDC_FILENAMEINPUT);
+						int fnLength= GetWindowTextLength(fnHandle) + 1;
+						wchar_t* filename = new wchar_t[fnLength];
+						GetWindowText(fnHandle, filename, fnLength);
+						filename[fnLength-1] = 0;
+						if (!LoadFile(filename)) {
+							Error(L"Не удалось загрузить файл");
+						};
+						delete[] filename;
+						break;
+					}
+				}
+				break;
+		}
+	}
+
+	return FALSE;
 }
 
 // Обработчик сообщений для окна "О программе".

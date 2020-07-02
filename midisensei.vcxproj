@@ -146,6 +146,7 @@
     <ClInclude Include="targetver.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="midifile.cpp" />
     <ClCompile Include="midisensei.cpp" />
   </ItemGroup>
   <ItemGroup>

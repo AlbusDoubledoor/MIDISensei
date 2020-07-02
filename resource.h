@@ -19,7 +19,10 @@
 #define IDC_OCTLIST                     1026
 #define IDC_RESET                       1028
 #define IDM_OPENKEYBOARD                10001
-#define IDM_PLAYFILE					10002
+#define IDM_PLAYFILE                    10003
+#define IDD_PLAYFILEDIALOG              10005
+#define IDC_LOADFILE_BUTTON             10007
+#define IDC_FILENAMEINPUT               10009
 #define IDC_STATIC                      -1
 
 // Next default values for new objects
@@ -27,9 +30,9 @@
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NO_MFC                     1
-#define _APS_NEXT_RESOURCE_VALUE        130
+#define _APS_NEXT_RESOURCE_VALUE        131
 #define _APS_NEXT_COMMAND_VALUE         32771
-#define _APS_NEXT_CONTROL_VALUE         1000
+#define _APS_NEXT_CONTROL_VALUE         1002
 #define _APS_NEXT_SYMED_VALUE           110
 #endif
 #endif
