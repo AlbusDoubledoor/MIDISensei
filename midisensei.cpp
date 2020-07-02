@@ -4,17 +4,6 @@
 #include "framework.h"
 #include "midisensei.h"
 
-#define MAX_LOADSTRING 100
-
-#define DRUM_CHANNEL 9
-
-#define DEFAULT_TEMPO 500000
-#define DEFAULT_BPM 120
-
-#define MIDI_FORMAT_SINGLE 0
-#define MIDI_FORMAT_SYNC_MULTI 1
-#define MIDI_FORMAT_ASYNC 2
-
 // Глобальные переменные:
 HINSTANCE hInst;                                // текущий экземпляр
 WCHAR szTitle[MAX_LOADSTRING];                  // Текст строки заголовка

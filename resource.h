@@ -23,6 +23,7 @@
 #define IDD_PLAYFILEDIALOG              10005
 #define IDC_LOADFILE_BUTTON             10007
 #define IDC_FILENAMEINPUT               10009
+#define IDC_PLAYFILE_BUTTON             10011
 #define IDC_STATIC                      -1
 
 // Next default values for new objects
@@ -32,7 +33,7 @@
 #define _APS_NO_MFC                     1
 #define _APS_NEXT_RESOURCE_VALUE        131
 #define _APS_NEXT_COMMAND_VALUE         32771
-#define _APS_NEXT_CONTROL_VALUE         1002
+#define _APS_NEXT_CONTROL_VALUE         1003
 #define _APS_NEXT_SYMED_VALUE           110
 #endif
 #endif

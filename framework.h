@@ -3,10 +3,9 @@
 //
 
 #pragma once
-
+#pragma comment(lib,"winmm.lib")
 #include "targetver.h"
 // Файлы заголовков Windows
-#define NOMINMAX
 #include <windows.h>
 #include <commctrl.h>
 // Файлы заголовков среды выполнения C
@@ -18,3 +17,4 @@
 #include <tchar.h>
 // Вспомогательные решения
 #include "midifile.cpp"
+#include "macro.h"

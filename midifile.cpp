@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <list>
 #include <string>
+#include "macro.h"
 
 struct MidiEvent
 {
@@ -79,10 +80,10 @@ public:
 		ifs.open(sFileName, std::fstream::in | std::ios::binary);
 		if (!ifs.is_open())
 			return false;
-		log.open("report.txt", std::fstream::out);
+		log.open(REPORT_FILE_NAME, std::fstream::out);
 		// Базовый каст wstring в string (иероглифы не сработают)
 		std::string fileName;
-		for (int idx = 0; idx < sFileName.length(); ++idx) {
+		for (uint16_t idx = 0; idx < sFileName.length(); ++idx) {
 			fileName += (char)sFileName[idx];
 		}
 		log << "Filename: " << fileName << std::endl;
