@@ -1,7 +1,4 @@
-﻿//{{NO_DEPENDENCIES}}
-// Включаемый файл, созданный в Microsoft Visual C++.
-// Используется midisensei.rc
-//
+﻿// Используется midisensei.rc
 #define IDC_MYICON                      2
 #define IDD_KEYBOARDDIALOG              101
 #define IDD_MIDISENSEI_DIALOG           102
@@ -13,22 +10,23 @@
 #define IDI_SMALL                       108
 #define IDC_MIDISENSEI                  109
 #define IDR_MAINFRAME                   128
-#define IDC_MIDIOUT                     1001
-#define IDC_PATCHLIST                   1024
-#define IDC_CHANLIST                    1025
-#define IDC_OCTLIST                     1026
-#define IDC_RESET                       1028
 #define IDM_OPENKEYBOARD                10001
 #define IDM_PLAYFILE                    10003
 #define IDD_PLAYFILEDIALOG              10005
 #define IDC_LOADFILE_BUTTON             10007
 #define IDC_FILENAMEINPUT               10009
 #define IDC_PLAYFILE_BUTTON             10011
-#define IDC_PLAYBACKCANCEL_BUTTON		10013
+#define IDC_PLAYBACKCANCEL_BUTTON       10013
+#define IDC_VIEWREPORT_BUTTON           10015
+#define IDC_MIDIOUT                     10017
+#define IDC_MIDIOUT_PLAY                10019
+#define IDC_PATCHLIST                   10021
+#define IDC_CHANLIST                    10023
+#define IDC_OCTLIST                     10025
+#define IDC_RESET                       10027
 #define IDC_STATIC                      -1
 
 // Next default values for new objects
-// 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NO_MFC                     1

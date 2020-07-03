@@ -1,21 +1,19 @@
-﻿// midisensei.cpp : Определяет точку входа для приложения.
-//
-
-#include "framework.h"
-#include "midisensei.h"
+﻿#include "midisensei.h"
 
 // Глобальные переменные:
 HINSTANCE hInst;                                // текущий экземпляр
 WCHAR szTitle[MAX_LOADSTRING];                  // Текст строки заголовка
 WCHAR szWindowClass[MAX_LOADSTRING];            // имя класса главного окна
-HMIDIOUT Out;                 // Ключ устройства вывода
-UINT Channel;                    // Номер канала (10 - drums, октава ~3-4)
-UINT Patch;                   // Номер тембра
-UINT Octave;				  // Октава - 0-10
-HWND DlgWin;                  // Ключ диалогового окна
-MidiFile TargetMidi;		  // Целевой миди-файл
-BOOL PlaybackStaged = FALSE;		  // Статус подготовки Playback (файл проигрывается)
-BOOL LoadMidiError = FALSE;			// Статус загрузки midi-файла
+HMIDIOUT Out;									// Ключ устройства вывода
+UINT Channel;									// Номер канала (10 - drums, октава ~3-4)
+UINT Patch;										// Номер тембра
+UINT Octave;									// Октава - 0-10
+HWND DlgKeyb;									// Ключ диалогового окна MIDI клавиатуры
+HWND DlgPlay;									// Ключ диалогового окна проигрывания файла
+MidiFile TargetMidi;							// Целевой миди-файл
+BOOL LoadStaged = FALSE;						// Статус загрузки файла (файл загружен)
+BOOL PlaybackStaged = FALSE;					// Статус подготовки Playback (файл проигрывается)
+BOOL LoadMidiError = FALSE;						// Статус загрузки midi-файла
 
 
 // Константы:
@@ -164,14 +162,9 @@ void InfoMessage(const wchar_t* Text) {
 	MessageBox(NULL, Text,MB_TITLE___INFO, MB_ICONINFORMATION | MB_OK);
 }
 
-// Сокращенный вариант функции сообщения диалоговому окну
-LONG DlgMsg(int Id, UINT Msg, LPARAM lp, WPARAM wp) {
-	return SendDlgItemMessage(DlgWin, Id, Msg, lp, wp);
-}
-
 // Добавление строки в ComboBox диалога
-void AddStringToCB(UINT Ctl, const wchar_t* Str) {
-	DlgMsg(Ctl, CB_ADDSTRING, 0, (LPARAM)Str);
+void AddStringToCB(HWND hDlg,UINT Ctl, const wchar_t* Str) {
+	SendDlgItemMessage(hDlg,Ctl, CB_ADDSTRING, 0, (LPARAM)Str);
 }
 
 // Посылка сообщения на открытое устройство
@@ -182,8 +175,8 @@ void MidiOut(DWORD Msg) {
 }
 
 // Посылка канального сообщения
-void MidiOutChannel(BYTE b1, BYTE b2, BYTE b3) {
-	MidiOut((((b3 << 8) | b2) << 8) | (b1 | BYTE(Channel)));
+void MidiOutChannel(BYTE status, BYTE data, BYTE velocity) {
+	MidiOut((((velocity << 8) | data) << 8) | (status | BYTE(Channel)));
 }
 
 // Посылка сообщения о смене тембра
@@ -223,11 +216,11 @@ void CloseDevices(void) {
 }
 
 // Открывание устройств
-int OpenDevices(void) {
+int OpenDevices(HWND hDlg,int controlId) {
 	MMRESULT Res;
 	Out = NULL;
 	// Получаем номер выбранного устройства в списке
-	int  DevN = DlgMsg(IDC_MIDIOUT, CB_GETCURSEL, 0, 0);
+	int  DevN = SendDlgItemMessage(hDlg,controlId, CB_GETCURSEL, 0, 0);
 
 	Res = midiOutOpen(&Out, DevN - 1, 0, 0, 0);
 
@@ -239,9 +232,24 @@ int OpenDevices(void) {
 	PatchChange();               // Выберем текущий тембр
 	return TRUE;
 }
-std::atomic<bool> playbackCancel;
-std::mutex awakeMutex;	
-std::condition_variable sleepLock;
+
+// Инициализация комбобокса с устройствами
+void InitMidiDevices(HWND hDlg,int controlId) {
+	int NumDevs;
+	int i;
+	// Заполняем списки устройств ввода, начиная с MIDI Mapper
+	NumDevs = midiOutGetNumDevs();
+	for (i = 0; i < NumDevs + 1; i++) {
+		MIDIOUTCAPS DevCaps;
+		midiOutGetDevCaps(i - 1, &DevCaps, sizeof(DevCaps));
+		SendDlgItemMessage(hDlg,controlId, CB_ADDSTRING, 0, (LPARAM)DevCaps.szPname);
+	}
+}
+
+std::atomic<bool> playbackCancel;	// флаг завершения проигрывания
+std::atomic<int> activeTracks;		// количество активных треков
+std::mutex awakeMutex;				// mutex для слипов в потоках
+std::condition_variable sleepLock;	// слип в потоках
 // Класс функции проигрывания трека (для использования потоками)
 class PlaybackTrack {
 public:
@@ -262,30 +270,51 @@ public:
 			BYTE nVelocity = midiTrk.vecEvents[nEvent].nVelocity;
 			midiOutShortMsg(Out, (((nVelocity << 8) | nKey) << 8) | nStatus);
 		}
+		activeTracks--;
+		if (activeTracks.load() == 0) {
+			CloseDevices();
+			playbackCancel.store(true);
+			PlaybackStaged = FALSE;
+		}
 	}
 };
 
 // Проиграть файл
 BOOL PlaybackFile() {
-	if (PlaybackStaged || LoadMidiError) {
+	if (PlaybackStaged || LoadMidiError || !LoadStaged) {
+		if (PlaybackStaged) {
+			Error(ERR_MSG_PLAY___OVER_PLAYBACK);
+		}
+		else if (LoadMidiError) {
+			Error(ERR_MSG_PLAY___LOAD_ERROR);
+		}
+		else if (!LoadStaged) {
+			Error(ERR_MSG_PLAY___LOAD_NOT_STAGED);
+		}
+		else{
+			Error(ERR_MSG_PLAY);
+		}
 		return FALSE;
 	}
+
 	PlaybackStaged = TRUE;
 	CloseDevices();
-	MMRESULT Res = midiOutOpen(&Out, 0, 0, 0, 0);
-	if (Res != MMSYSERR_NOERROR) {
-		Error(ERR_MSG_MIDI___DEVICE);
+	BOOL successOpen = OpenDevices(DlgPlay,IDC_MIDIOUT_PLAY);
+	if (!successOpen) {
 		return PlaybackStaged = FALSE;
 	}
+
 	if (TargetMidi.m_nTempo == 0)
 		TargetMidi.m_nTempo = DEFAULT_TEMPO;
 	if (TargetMidi.m_nBPM == 0)
 		TargetMidi.m_nBPM = DEFAULT_BPM;
-	int tracksNum = TargetMidi.vecTracks.size();
+
 	std::vector<std::thread> threads;
 	std::vector<MidiTrack>::iterator track_it;
 	playbackCancel.store(false);
+	activeTracks.store(0);
 	for (track_it = TargetMidi.vecTracks.begin(); track_it != TargetMidi.vecTracks.end(); track_it++) {
+		activeTracks++;
 		PlaybackTrack playbackTrackFunction;
 		threads.push_back(std::thread(playbackTrackFunction, (*track_it)));
 	}
@@ -301,6 +330,7 @@ BOOL LoadFile(const wchar_t* filename) {
 	if (PlaybackStaged) {
 		return FALSE;
 	}
+	LoadStaged = FALSE;
 	std::wstring wFilename = std::wstring(filename);
 	TargetMidi = MidiFile();
 	LoadMidiError = FALSE;
@@ -308,14 +338,25 @@ BOOL LoadFile(const wchar_t* filename) {
 	{
 		return FALSE;
 	}
-	PlaybackFile();
+	LoadStaged = TRUE;
 	return TRUE;
+}
+
+// Прекращение воспроизведения файла
+void PlaybackCancel() {
+	{
+		std::lock_guard<std::mutex> lock(awakeMutex);
+		playbackCancel.store(true);
+		sleepLock.notify_all();
+	}
+	activeTracks.store(0);
+	PlaybackStaged = FALSE;
 }
 
 ATOM                MidiSenseiRegisterClass(HINSTANCE hInstance);
 BOOL                InitInstance(HINSTANCE, int);
 LRESULT CALLBACK    WndProc(HWND, UINT, WPARAM, LPARAM);
-INT_PTR CALLBACK    About(HWND, UINT, WPARAM, LPARAM);
+INT_PTR CALLBACK    DefaultDlgHandler(HWND, UINT, WPARAM, LPARAM);
 BOOL CALLBACK    MidiKeyboard(HWND, UINT, WPARAM, LPARAM);
 BOOL CALLBACK    PlayFileHandler(HWND, UINT, WPARAM, LPARAM);
 
@@ -359,11 +400,11 @@ int APIENTRY wWinMain(HINSTANCE hInstance,
 				10-я октава содержит только 8 нот*/
 			// Обработка сообщений о нажатии/отпускании клавиш
 			int VK = wParam;              // Код клавиши
-			BOOL Rpt = (lParam & 0x40000000); // Признак повторения
+			BOOL repeatFlag = (lParam & 0x40000000); // Признак повторения
 			// Ищем клавишу в таблице соответствия
 			char* p = strchr(KeyToNote, tolower(VK));
 			if (p) {
-				if (!Rpt) {             // Повторение пропускаем
+				if (!repeatFlag) {             // Повторение пропускаем
 					// MIDI-сообщения по событию ноты:
 					// 9c nn vv - нажать
 					// 8c nn vv - отпустить
@@ -388,11 +429,6 @@ int APIENTRY wWinMain(HINSTANCE hInstance,
 	return (int)msg.wParam;
 }
 
-
-
-//
-//  ЦЕЛЬ: Регистрирует класс окна.
-//
 ATOM MidiSenseiRegisterClass(HINSTANCE hInstance)
 {
 	WNDCLASSEXW wcex;
@@ -414,16 +450,6 @@ ATOM MidiSenseiRegisterClass(HINSTANCE hInstance)
 	return RegisterClassExW(&wcex);
 }
 
-//
-//   ФУНКЦИЯ: InitInstance(HINSTANCE, int)
-//
-//   ЦЕЛЬ: Сохраняет маркер экземпляра и создает главное окно
-//
-//   КОММЕНТАРИИ:
-//
-//        В этой функции маркер экземпляра сохраняется в глобальной переменной, а также
-//        создается и выводится главное окно программы.
-//
 BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 {
 	hInst = hInstance; // Сохранить маркер экземпляра в глобальной переменной
@@ -433,10 +459,12 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 	{
 		return FALSE;
 	}
+	// Кнопка открытия клавиатуры/записи файла
 	HWND hKeyboardButton = CreateWindowW(WC_BUTTONW, BTN_LABEL___MKEYB, 
 		WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON, 
 		10, 10, 200, 50, hWnd, (HMENU)IDM_OPENKEYBOARD, 
 		(HINSTANCE)GetWindowLongPtr(hWnd, GWLP_HINSTANCE), NULL);
+	// Кнопка открытия проигрывателя
 	HWND hPlayFileButton = CreateWindowW(WC_BUTTONW, BTN_LABEL___PLAYFILE,
 		WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
 		220, 10, 175, 50, hWnd, (HMENU)IDM_PLAYFILE,
@@ -447,16 +475,6 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 	return TRUE;
 }
 
-//
-//  ФУНКЦИЯ: WndProc(HWND, UINT, WPARAM, LPARAM)
-//
-//  ЦЕЛЬ: Обрабатывает сообщения в главном окне.
-//
-//  WM_COMMAND  - обработать меню приложения
-//  WM_PAINT    - Отрисовка главного окна
-//  WM_DESTROY  - отправить сообщение о выходе и вернуться
-//
-//
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
 	switch (message)
@@ -468,15 +486,15 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		switch (wmId)
 		{
 		case IDM_ABOUT:
-			DialogBox(hInst, MAKEINTRESOURCE(IDD_ABOUTBOX), hWnd, About);
+			DialogBox(hInst, MAKEINTRESOURCE(IDD_ABOUTBOX), hWnd, DefaultDlgHandler);
 			break;
 		case IDM_EXIT:
 			DestroyWindow(hWnd);
 			break;
 		case IDM_OPENKEYBOARD:
 			// Делаем немодальное окно для обработки клавиш в фоновом режиме в основном окне
-			DlgWin = CreateDialog(hInst, MAKEINTRESOURCE(IDD_KEYBOARDDIALOG), hWnd, MidiKeyboard);
-			ShowWindow(DlgWin, SW_SHOW);
+			DlgKeyb = CreateDialog(hInst, MAKEINTRESOURCE(IDD_KEYBOARDDIALOG), hWnd, MidiKeyboard);
+			ShowWindow(DlgKeyb, SW_SHOW);
 			break;
 		case IDM_PLAYFILE:
 			DialogBox(hInst, MAKEINTRESOURCE(IDD_PLAYFILEDIALOG), hWnd, PlayFileHandler);
@@ -507,15 +525,26 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 BOOL CALLBACK PlayFileHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 {
 	UNREFERENCED_PARAMETER(lParam);
+	DlgPlay = hDlg;
 	UINT controlId = LOWORD(wParam);
 	switch (message)
 	{
+	case WM_INITDIALOG: {
+		// Инициализация списка MIDI-устройств
+		InitMidiDevices(hDlg,IDC_MIDIOUT_PLAY);
+		// Инициализация переменных состояния
+		playbackCancel.store(false);
+		PlaybackStaged = FALSE;
+		LoadStaged = FALSE;
+		return TRUE;
+	}
 	case WM_COMMAND:
 		{
 			switch (controlId) {
 				case IDOK:
 				case IDCANCEL:
 					{
+						PlaybackCancel();
 						EndDialog(hDlg, LOWORD(wParam));
 						return TRUE;
 					}
@@ -529,31 +558,56 @@ BOOL CALLBACK PlayFileHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPa
 						filename[fnLength-1] = 0;
 						if (!LoadFile(filename)) {
 							Error(PlaybackStaged?ERR_MSG_LOAD___OVER_PLAYBACK:ERR_MSG_LOAD___OTHER);
-						};
+						}
+						else {
+							InfoMessage(INFO_MSG_FILE_LOADED);
+						}
 						delete[] filename;
 						break;
 					}
+				case IDC_PLAYFILE_BUTTON:
+				{
+					PlaybackFile();
+					break;
+				}
 				case IDC_PLAYBACKCANCEL_BUTTON:
 					{
-						{
-							std::lock_guard<std::mutex> lock(awakeMutex);
-							playbackCancel.store(true);
-							sleepLock.notify_all();
-						}
-						PlaybackStaged = FALSE;
+						PlaybackCancel();
 						break;
 					}
+				case IDC_MIDIOUT_PLAY:
+				{
+					if (HIWORD(wParam) != CBN_SELENDOK || !playbackCancel.load()) {
+						break;
+					}
+					CloseDevices();
+					OpenDevices(hDlg,IDC_MIDIOUT_PLAY);
+					break;
 				}
+				case IDC_VIEWREPORT_BUTTON:
+					{
+						std::ifstream checkReport;
+						checkReport.open(REPORT_FILE_NAME, std::fstream::in);
+						if (checkReport.is_open())
+						{
+							checkReport.close();
+							ShellExecuteA(GetDesktopWindow(), SHELL_COMMAND_OPEN, REPORT_FILE_NAME, NULL, NULL, SW_SHOW);
+						}
+						else {
+							InfoMessage(INFO_MSG_REPORT);
+						}
+						break;
+					}
 				break;
+			}
 		}
 
 	}
-
 	return FALSE;
 }
 
-// Обработчик сообщений для окна "О программе".
-INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
+// Стандартный обработчик для диалогового окна
+INT_PTR CALLBACK DefaultDlgHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 {
 	UNREFERENCED_PARAMETER(lParam);
 	switch (message)
@@ -577,36 +631,30 @@ INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 BOOL CALLBACK MidiKeyboard(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 {
 	UNREFERENCED_PARAMETER(lParam);
-	DlgWin = hDlg;
+	DlgKeyb = hDlg;
 	UINT controlId = LOWORD(wParam);
 	switch (message)
 	{
 		case WM_INITDIALOG: {
-			int NumDevs;
+			// Инициализация списка MIDI-устройств
+			InitMidiDevices(hDlg,IDC_MIDIOUT);
 			int i;
-			// Заполняем списки устройств ввода, начиная с MIDI Mapper
-			NumDevs = midiOutGetNumDevs();
-			for (i = 0; i < NumDevs + 1; i++) {
-				MIDIOUTCAPS DevCaps;
-				midiOutGetDevCaps(i - 1, &DevCaps, sizeof(DevCaps));
-				DlgMsg(IDC_MIDIOUT, CB_ADDSTRING, 0, (LPARAM)DevCaps.szPname);
-
-			}
 			// Заполняем список каналов
 			for (i = 0; i < 16; i++) {
-				AddStringToCB(IDC_CHANLIST, wstr(i+1).c_str());
+				AddStringToCB(hDlg,IDC_CHANLIST, wstr(i+1).c_str());
 			}
-			Channel = DlgMsg(IDC_CHANLIST, CB_SETCURSEL, 0, 0);
+			Channel = SendDlgItemMessage(hDlg,IDC_CHANLIST, CB_SETCURSEL, 0, 0);
 			// Заполняем список тембров
 			for (i = 0; i < 128; i++) {
-				AddStringToCB(IDC_PATCHLIST, PatchNames[i]);
+				AddStringToCB(hDlg,IDC_PATCHLIST, PatchNames[i]);
 			}
-			Patch = DlgMsg(IDC_PATCHLIST, CB_SETCURSEL, 0, 0);
+			Patch = SendDlgItemMessage(hDlg,IDC_PATCHLIST, CB_SETCURSEL, 0, 0);
 			// Заполняем список октав
 			for (i = 0; i < 11; i++) {
-				AddStringToCB(IDC_OCTLIST, wstr(i).c_str());
+				AddStringToCB(hDlg,IDC_OCTLIST, wstr(i).c_str());
 			}
-			Octave = DlgMsg(IDC_OCTLIST, CB_SETCURSEL, 6, 0); // В начале установим 6-ю октаву
+			// В начале установим 6-ю октаву
+			Octave = SendDlgItemMessage(hDlg,IDC_OCTLIST, CB_SETCURSEL, 6, 0); 
 			return TRUE;
 		}
 
@@ -618,13 +666,13 @@ BOOL CALLBACK MidiKeyboard(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
 				{
 					CloseDevices();
 					EndDialog(hDlg, LOWORD(wParam));
-					DlgWin = NULL;
+					DlgKeyb = NULL;
 					return TRUE;
 				}
 				case IDC_RESET:
 				{
 					CloseDevices();
-					OpenDevices();
+					OpenDevices(hDlg,IDC_MIDIOUT);
 					AllNotesOff();
 					return TRUE;
 				}
@@ -634,7 +682,7 @@ BOOL CALLBACK MidiKeyboard(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
 						break;
 					}
 					CloseDevices();
-					OpenDevices();
+					OpenDevices(hDlg,IDC_MIDIOUT);
 					break;
 				}
 				case IDC_CHANLIST:
@@ -642,10 +690,10 @@ BOOL CALLBACK MidiKeyboard(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
 					if (HIWORD(wParam) != CBN_SELENDOK) { 
 						break;
 					}
-					Channel = DlgMsg(controlId, CB_GETCURSEL, 0, 0);
+					Channel = SendDlgItemMessage(hDlg,controlId, CB_GETCURSEL, 0, 0);
 					if (Channel == DRUM_CHANNEL && (Octave < 2 || Octave > 4))
 						InfoMessage(INFO_MSG_DRUMS);
-					SendMessage(DlgWin, WM_SETFOCUS, 0, 0);
+					SendMessage(DlgKeyb, WM_SETFOCUS, 0, 0);
 					PatchChange();   
 					break;
 				}
@@ -654,8 +702,8 @@ BOOL CALLBACK MidiKeyboard(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
 					if (HIWORD(wParam) != CBN_SELCHANGE) {
 						break;
 					}
-					Patch = DlgMsg(controlId, CB_GETCURSEL, 0, 0);
-					SendMessage(DlgWin, WM_SETFOCUS, 0, 0);
+					Patch = SendDlgItemMessage(hDlg,controlId, CB_GETCURSEL, 0, 0);
+					SendMessage(DlgKeyb, WM_SETFOCUS, 0, 0);
 					PatchChange();    
 					break;
 				}
@@ -664,10 +712,10 @@ BOOL CALLBACK MidiKeyboard(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
 					if (HIWORD(wParam) != CBN_SELCHANGE) {
 						break;
 					}
-					Octave = DlgMsg(controlId, CB_GETCURSEL, 0, 0);
+					Octave = SendDlgItemMessage(hDlg,controlId, CB_GETCURSEL, 0, 0);
 					if (Channel == DRUM_CHANNEL && (Octave < 2 || Octave > 4))
 						InfoMessage(INFO_MSG_DRUMS);
-					SendMessage(DlgWin, WM_SETFOCUS, 0, 0);
+					SendMessage(DlgKeyb, WM_SETFOCUS, 0, 0);
 					break;
 				}
 			}

@@ -1,16 +1,17 @@
-﻿// header.h: включаемый файл для стандартных системных включаемых файлов
-// или включаемые файлы для конкретного проекта
-//
-
-#pragma once
+﻿#pragma once
 #pragma comment(lib,"winmm.lib")
 #include "targetver.h"
 // Файлы заголовков Windows
 #include <windows.h>
+#include <ShellApi.h>
 #include <commctrl.h>
 // Файлы заголовков среды выполнения C
 #include <stdlib.h>
+#include <bitset>
 #include <string>
+#include <fstream>
+#include <iostream>
+#include <vector>
 #include <thread>
 #include <mutex>
 #include <condition_variable>
@@ -20,5 +21,4 @@
 #include <memory.h>
 #include <tchar.h>
 // Вспомогательные решения
-#include "midifile.cpp"
 #include "macro.h"

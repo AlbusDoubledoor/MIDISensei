@@ -1,11 +1,4 @@
-#include <fstream>
-#include <iostream>
-#include <array>
-#include <vector>
-#include <algorithm>
-#include <list>
-#include <string>
-#include "macro.h"
+#include "framework.h"
 
 struct MidiEvent
 {
@@ -151,7 +144,7 @@ public:
 		// Считываем MIDI треки
 		for (uint16_t nChunk = 0; nChunk < nTrackChunks; nChunk++)
 		{
-			log << "===== NEW TRACK" << std::endl;
+			log << "===== TRACK #" << nChunk+1 << "=====" << std::endl;
 			// Заголовок MIDI трека
 			ifs.read((char*)&n32, sizeof(uint32_t));
 			uint32_t nTrackID = Swap32(n32);
@@ -316,7 +309,7 @@ public:
 							log << "Sequencer Specific: " << ReadString(nLength) << std::endl;
 							break;
 						default:
-							log << "Unrecognised MetaEvent: " << nType << std::endl;
+							log << "Unrecognised MetaEvent: " << std::bitset<8>(nType) << std::endl;
 						}
 					}
 
@@ -334,7 +327,7 @@ public:
 				}
 				else
 				{
-					log << "Unrecognised Status Byte: " << nStatus << std::endl;
+					log << "Unrecognised Status Byte: " << std::bitset<8>(nStatus) << std::endl;
 				}
 			}
 		}
