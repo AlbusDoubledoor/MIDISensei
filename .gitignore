@@ -4,3 +4,6 @@ Debug
 Release
 *.mid
 report.*
+*.png
+*.jpg
+*.gif
