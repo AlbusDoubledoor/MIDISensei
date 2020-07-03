@@ -74,27 +74,27 @@ public:
 		if (!ifs.is_open())
 			return false;
 		log.open(REPORT_FILE_NAME, std::fstream::out);
-		// Базовый каст wstring в string (иероглифы не сработают)
+		// Р‘Р°Р·РѕРІС‹Р№ РєР°СЃС‚ wstring РІ string (РёРµСЂРѕРіР»РёС„С‹ РЅРµ СЃСЂР°Р±РѕС‚Р°СЋС‚)
 		std::string fileName;
 		for (uint16_t idx = 0; idx < sFileName.length(); ++idx) {
 			fileName += (char)sFileName[idx];
 		}
 		log << "Filename: " << fileName << std::endl;
-		// Функции смены нужны для того, чтобы выставить биты в нужном порядке, 
-		// так как в .MID файлах используется Big-Endian (сначала старший байт, потом младший)
-		// Смена порядка следования битов для 32-битного числа
+		// Р¤СѓРЅРєС†РёРё СЃРјРµРЅС‹ РЅСѓР¶РЅС‹ РґР»СЏ С‚РѕРіРѕ, С‡С‚РѕР±С‹ РІС‹СЃС‚Р°РІРёС‚СЊ Р±РёС‚С‹ РІ РЅСѓР¶РЅРѕРј РїРѕСЂСЏРґРєРµ, 
+		// С‚Р°Рє РєР°Рє РІ .MID С„Р°Р№Р»Р°С… РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ Big-Endian (СЃРЅР°С‡Р°Р»Р° СЃС‚Р°СЂС€РёР№ Р±Р°Р№С‚, РїРѕС‚РѕРј РјР»Р°РґС€РёР№)
+		// РЎРјРµРЅР° РїРѕСЂСЏРґРєР° СЃР»РµРґРѕРІР°РЅРёСЏ Р±РёС‚РѕРІ РґР»СЏ 32-Р±РёС‚РЅРѕРіРѕ С‡РёСЃР»Р°
 		auto Swap32 = [](uint32_t n)
 		{
 			return (((n >> 24) & 0xff) | ((n << 8) & 0xff0000) | ((n >> 8) & 0xff00) | ((n << 24) & 0xff000000));
 		};
 
-		// Смена порядка следования битов для 16-битного числа
+		// РЎРјРµРЅР° РїРѕСЂСЏРґРєР° СЃР»РµРґРѕРІР°РЅРёСЏ Р±РёС‚РѕРІ РґР»СЏ 16-Р±РёС‚РЅРѕРіРѕ С‡РёСЃР»Р°
 		auto Swap16 = [](uint16_t n)
 		{
 			return ((n >> 8) | (n << 8));
 		};
 
-		// Чтение строки из файлового потока [побайтово]
+		// Р§С‚РµРЅРёРµ СЃС‚СЂРѕРєРё РёР· С„Р°Р№Р»РѕРІРѕРіРѕ РїРѕС‚РѕРєР° [РїРѕР±Р°Р№С‚РѕРІРѕ]
 		auto ReadString = [&ifs](uint32_t nLength)
 		{
 			std::string s;
@@ -102,17 +102,17 @@ public:
 			return s;
 		};
 
-		// Чтение так называемого Variable Length-объекта
-		// Используется для записи delta-time информации, длин треков, длин sysex, etc..
-		// Может быть до 4 байтов (max)
-		// Если старший бит сброшен, то это последний байт в VL-объекте
+		// Р§С‚РµРЅРёРµ С‚Р°Рє РЅР°Р·С‹РІР°РµРјРѕРіРѕ Variable Length-РѕР±СЉРµРєС‚Р°
+		// РСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ РґР»СЏ Р·Р°РїРёСЃРё delta-time РёРЅС„РѕСЂРјР°С†РёРё, РґР»РёРЅ С‚СЂРµРєРѕРІ, РґР»РёРЅ sysex, etc..
+		// РњРѕР¶РµС‚ Р±С‹С‚СЊ РґРѕ 4 Р±Р°Р№С‚РѕРІ (max)
+		// Р•СЃР»Рё СЃС‚Р°СЂС€РёР№ Р±РёС‚ СЃР±СЂРѕС€РµРЅ, С‚Рѕ СЌС‚Рѕ РїРѕСЃР»РµРґРЅРёР№ Р±Р°Р№С‚ РІ VL-РѕР±СЉРµРєС‚Рµ
 		auto ReadValue = [&ifs]()
 		{
 			uint32_t nValue = 0;
 			uint8_t nByte = 0;
 			nValue = ifs.get();
 
-			// Проверяем старший бит (если установлен, то нужно считывать ещё один байт)
+			// РџСЂРѕРІРµСЂСЏРµРј СЃС‚Р°СЂС€РёР№ Р±РёС‚ (РµСЃР»Рё СѓСЃС‚Р°РЅРѕРІР»РµРЅ, С‚Рѕ РЅСѓР¶РЅРѕ СЃС‡РёС‚С‹РІР°С‚СЊ РµС‰С‘ РѕРґРёРЅ Р±Р°Р№С‚)
 			if (nValue & 0x80)
 			{
 				nValue &= 0x7F;
@@ -120,7 +120,7 @@ public:
 				{
 					nByte = ifs.get();
 					nValue = (nValue << 7) | (nByte & 0x7F);
-				} while (nByte & 0x80); // Считываем, пока старший бит установлен
+				} while (nByte & 0x80); // РЎС‡РёС‚С‹РІР°РµРј, РїРѕРєР° СЃС‚Р°СЂС€РёР№ Р±РёС‚ СѓСЃС‚Р°РЅРѕРІР»РµРЅ
 			}
 			return nValue;
 		};
@@ -128,7 +128,7 @@ public:
 		uint32_t n32 = 0;
 		uint16_t n16 = 0;
 
-		// Считываем MIDI заголовок
+		// РЎС‡РёС‚С‹РІР°РµРј MIDI Р·Р°РіРѕР»РѕРІРѕРє
 		ifs.read((char*)&n32, sizeof(uint32_t));
 		uint32_t nFileID = Swap32(n32);
 		ifs.read((char*)&n32, sizeof(uint32_t));
@@ -141,11 +141,11 @@ public:
 		ifs.read((char*)&n16, sizeof(uint16_t));
 		m_nDivision = Swap16(n16);
 
-		// Считываем MIDI треки
+		// РЎС‡РёС‚С‹РІР°РµРј MIDI С‚СЂРµРєРё
 		for (uint16_t nChunk = 0; nChunk < nTrackChunks; nChunk++)
 		{
 			log << "===== TRACK #" << nChunk+1 << "=====" << std::endl;
-			// Заголовок MIDI трека
+			// Р—Р°РіРѕР»РѕРІРѕРє MIDI С‚СЂРµРєР°
 			ifs.read((char*)&n32, sizeof(uint32_t));
 			uint32_t nTrackID = Swap32(n32);
 			ifs.read((char*)&n32, sizeof(uint32_t));
@@ -157,47 +157,47 @@ public:
 
 			while (!ifs.eof() && !bEndOfTrack)
 			{
-				// Все MIDI события содержат время (которое нужно подождать) и status-байт
+				// Р’СЃРµ MIDI СЃРѕР±С‹С‚РёСЏ СЃРѕРґРµСЂР¶Р°С‚ РІСЂРµРјСЏ (РєРѕС‚РѕСЂРѕРµ РЅСѓР¶РЅРѕ РїРѕРґРѕР¶РґР°С‚СЊ) Рё status-Р±Р°Р№С‚
 				uint32_t nStatusTimeDelta = 0;
 				uint8_t nStatus = 0;
 
 				nStatusTimeDelta = ReadValue();
 				nStatus = ifs.get();
 
-				// Все MIDI статусные события имеют установленный старший бит
-				// Для данных внутри стандартного события он сброшен
-				// Это позволяет избежать избыточной отправки статусных байтов 
-				// для событий, которые относятся к одному MIDI-статусу
-				// (такой режим называется Running status)
+				// Р’СЃРµ MIDI СЃС‚Р°С‚СѓСЃРЅС‹Рµ СЃРѕР±С‹С‚РёСЏ РёРјРµСЋС‚ СѓСЃС‚Р°РЅРѕРІР»РµРЅРЅС‹Р№ СЃС‚Р°СЂС€РёР№ Р±РёС‚
+				// Р”Р»СЏ РґР°РЅРЅС‹С… РІРЅСѓС‚СЂРё СЃС‚Р°РЅРґР°СЂС‚РЅРѕРіРѕ СЃРѕР±С‹С‚РёСЏ РѕРЅ СЃР±СЂРѕС€РµРЅ
+				// Р­С‚Рѕ РїРѕР·РІРѕР»СЏРµС‚ РёР·Р±РµР¶Р°С‚СЊ РёР·Р±С‹С‚РѕС‡РЅРѕР№ РѕС‚РїСЂР°РІРєРё СЃС‚Р°С‚СѓСЃРЅС‹С… Р±Р°Р№С‚РѕРІ 
+				// РґР»СЏ СЃРѕР±С‹С‚РёР№, РєРѕС‚РѕСЂС‹Рµ РѕС‚РЅРѕСЃСЏС‚СЃСЏ Рє РѕРґРЅРѕРјСѓ MIDI-СЃС‚Р°С‚СѓСЃСѓ
+				// (С‚Р°РєРѕР№ СЂРµР¶РёРј РЅР°Р·С‹РІР°РµС‚СЃСЏ Running status)
 				if (nStatus < 0x80)
 				{
 					nStatus = nPreviousStatus;
-					// Возвращаем указатель потока обратно, иначе произойдет
-					// десинхронизация всего потока (так как мы уже считали байт для проверки)
+					// Р’РѕР·РІСЂР°С‰Р°РµРј СѓРєР°Р·Р°С‚РµР»СЊ РїРѕС‚РѕРєР° РѕР±СЂР°С‚РЅРѕ, РёРЅР°С‡Рµ РїСЂРѕРёР·РѕР№РґРµС‚
+					// РґРµСЃРёРЅС…СЂРѕРЅРёР·Р°С†РёСЏ РІСЃРµРіРѕ РїРѕС‚РѕРєР° (С‚Р°Рє РєР°Рє РјС‹ СѓР¶Рµ СЃС‡РёС‚Р°Р»Рё Р±Р°Р№С‚ РґР»СЏ РїСЂРѕРІРµСЂРєРё)
 					ifs.seekg(-1, std::ios_base::cur);
 				}
 
-				// Событие отжатия ноты
+				// РЎРѕР±С‹С‚РёРµ РѕС‚Р¶Р°С‚РёСЏ РЅРѕС‚С‹
 				if ((nStatus & 0xF0) == EventName::VoiceNoteOff)
 				{
 					nPreviousStatus = nStatus;
-					uint8_t nNoteID = ifs.get();	// номер ноты (id)
-					uint8_t nNoteVelocity = ifs.get(); // скорость отжатия
+					uint8_t nNoteID = ifs.get();	// РЅРѕРјРµСЂ РЅРѕС‚С‹ (id)
+					uint8_t nNoteVelocity = ifs.get(); // СЃРєРѕСЂРѕСЃС‚СЊ РѕС‚Р¶Р°С‚РёСЏ
 					vecTracks[nChunk].vecEvents.push_back({ MidiEvent::Type::NoteOff, nStatus, nNoteID, nNoteVelocity, nStatusTimeDelta });
 				}
-				// Нажатие ноты
+				// РќР°Р¶Р°С‚РёРµ РЅРѕС‚С‹
 				else if ((nStatus & 0xF0) == EventName::VoiceNoteOn)
 				{
 					nPreviousStatus = nStatus;
 					uint8_t nNoteID = ifs.get();
 					uint8_t nNoteVelocity = ifs.get();
-					// Если скорость нажатия = 0, то это эквивалентно отжатию ноты
+					// Р•СЃР»Рё СЃРєРѕСЂРѕСЃС‚СЊ РЅР°Р¶Р°С‚РёСЏ = 0, С‚Рѕ СЌС‚Рѕ СЌРєРІРёРІР°Р»РµРЅС‚РЅРѕ РѕС‚Р¶Р°С‚РёСЋ РЅРѕС‚С‹
 					if (nNoteVelocity == 0)
 						vecTracks[nChunk].vecEvents.push_back({ MidiEvent::Type::NoteOff, nStatus, nNoteID, nNoteVelocity, nStatusTimeDelta });
 					else
 						vecTracks[nChunk].vecEvents.push_back({ MidiEvent::Type::NoteOn, nStatus, nNoteID, nNoteVelocity, nStatusTimeDelta });
 				}
-				// так называемый звук Aftertouch ("послекасание")
+				// С‚Р°Рє РЅР°Р·С‹РІР°РµРјС‹Р№ Р·РІСѓРє Aftertouch ("РїРѕСЃР»РµРєР°СЃР°РЅРёРµ")
 				else if ((nStatus & 0xF0) == EventName::VoiceAftertouch)
 				{
 					nPreviousStatus = nStatus;
@@ -205,7 +205,7 @@ public:
 					uint8_t nNoteVelocity = ifs.get();
 					vecTracks[nChunk].vecEvents.push_back({ MidiEvent::Type::Other, nStatus, nNoteID, nNoteVelocity, nStatusTimeDelta });
 				}
-				// Смена устройства
+				// РЎРјРµРЅР° СѓСЃС‚СЂРѕР№СЃС‚РІР°
 				else if ((nStatus & 0xF0) == EventName::VoiceControlChange)
 				{
 					nPreviousStatus = nStatus;
@@ -213,21 +213,21 @@ public:
 					uint8_t nControlValue = ifs.get();
 					vecTracks[nChunk].vecEvents.push_back({ MidiEvent::Type::Other, nStatus, nControlID, nControlValue, nStatusTimeDelta });
 				}
-				// Смена программы (патч, тембр)
+				// РЎРјРµРЅР° РїСЂРѕРіСЂР°РјРјС‹ (РїР°С‚С‡, С‚РµРјР±СЂ)
 				else if ((nStatus & 0xF0) == EventName::VoiceProgramChange)
 				{
 					nPreviousStatus = nStatus;
 					uint8_t nProgramID = ifs.get();
 					vecTracks[nChunk].vecEvents.push_back({ MidiEvent::Type::Other, nStatus,nProgramID,0,nStatusTimeDelta });
 				}
-				// Параметр силы нажатия нот в канале
+				// РџР°СЂР°РјРµС‚СЂ СЃРёР»С‹ РЅР°Р¶Р°С‚РёСЏ РЅРѕС‚ РІ РєР°РЅР°Р»Рµ
 				else if ((nStatus & 0xF0) == EventName::VoiceChannelPressure)
 				{
 					nPreviousStatus = nStatus;
 					uint8_t nChannelPressure = ifs.get();
 					vecTracks[nChunk].vecEvents.push_back({ MidiEvent::Type::Other,nStatus,nChannelPressure,0,nStatusTimeDelta });
 				}
-				// Параметры высоты звука в канале (увеличение/уменьшение базовой частоты нот), он же Pitch Wheel
+				// РџР°СЂР°РјРµС‚СЂС‹ РІС‹СЃРѕС‚С‹ Р·РІСѓРєР° РІ РєР°РЅР°Р»Рµ (СѓРІРµР»РёС‡РµРЅРёРµ/СѓРјРµРЅСЊС€РµРЅРёРµ Р±Р°Р·РѕРІРѕР№ С‡Р°СЃС‚РѕС‚С‹ РЅРѕС‚), РѕРЅ Р¶Рµ Pitch Wheel
 				else if ((nStatus & 0xF0) == EventName::VoicePitchBend)
 				{
 					nPreviousStatus = nStatus;
@@ -236,14 +236,14 @@ public:
 					vecTracks[nChunk].vecEvents.push_back({ MidiEvent::Type::Other,nStatus,nLS7B,nMS7B,nStatusTimeDelta });
 
 				}
-				// Meta- события (и SysEx)
+				// Meta- СЃРѕР±С‹С‚РёСЏ (Рё SysEx)
 				else if ((nStatus & 0xF0) == EventName::SystemExclusive)
 				{
 					nPreviousStatus = 0;
 
 					if (nStatus == 0xFF)
 					{
-						// Meta сообщение
+						// Meta СЃРѕРѕР±С‰РµРЅРёРµ
 						uint8_t nType = ifs.get();
 						uint8_t nLength = ReadValue();
 						switch (nType)
@@ -281,7 +281,7 @@ public:
 							bEndOfTrack = true;
 							break;
 						case MetaSetTempo:
-							// Темп в микросекундах на четверть
+							// РўРµРјРї РІ РјРёРєСЂРѕСЃРµРєСѓРЅРґР°С… РЅР° С‡РµС‚РІРµСЂС‚СЊ
 							if (m_nTempo == 0)
 							{
 								(m_nTempo |= (ifs.get() << 16));
@@ -298,7 +298,7 @@ public:
 							log << "Time Signature: " << ifs.get() << "/" << (2 << ifs.get()) << std::endl;
 							log << "ClocksPerTick: " << ifs.get() << std::endl;
 
-							// MIDI бит - 24 тика, сколько 32-ых будет в одном бите
+							// MIDI Р±РёС‚ - 24 С‚РёРєР°, СЃРєРѕР»СЊРєРѕ 32-С‹С… Р±СѓРґРµС‚ РІ РѕРґРЅРѕРј Р±РёС‚Рµ
 							log << "32per24Clocks: " << ifs.get() << std::endl;
 							break;
 						case MetaKeySignature:
@@ -315,13 +315,13 @@ public:
 
 					if (nStatus == 0xF0)
 					{
-						// Начало SysEx
+						// РќР°С‡Р°Р»Рѕ SysEx
 						log << "System Exclusive Begin: " << ReadString(ReadValue()) << std::endl;
 					}
 
 					if (nStatus == 0xF7)
 					{
-						// Конец SysEx
+						// РљРѕРЅРµС† SysEx
 						log << "System Exclusive End: " << ReadString(ReadValue()) << std::endl;
 					}
 				}
