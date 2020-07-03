@@ -14,7 +14,9 @@ UINT Patch;                   // Номер тембра
 UINT Octave;				  // Октава - 0-10
 HWND DlgWin;                  // Ключ диалогового окна
 MidiFile TargetMidi;		  // Целевой миди-файл
-BOOL targetMidiError;		  // Флаг ошибки загрузки файла
+BOOL PlaybackStaged = FALSE;		  // Статус подготовки Playback (файл проигрывается)
+BOOL LoadMidiError = FALSE;			// Статус загрузки midi-файла
+
 
 // Константы:
 char KeyToNote[] = "zsxdcvgbhnjmq2w3er5t6y7u"; // Таблица клавиши -> ноты
@@ -154,12 +156,12 @@ const wchar_t* PatchNames[] = {
 
 // Выдача сообщения об ошибке
 void Error(const wchar_t* Text) {
-	MessageBox(NULL, Text, L"Ошибка", MB_ICONERROR | MB_OK);
+	MessageBox(NULL, Text, MB_TITLE___ERROR, MB_ICONERROR | MB_OK);
 }
 
 // Информационное сообщение
 void InfoMessage(const wchar_t* Text) {
-	MessageBox(NULL, Text, L"Информация", MB_OK);
+	MessageBox(NULL, Text,MB_TITLE___INFO, MB_ICONINFORMATION | MB_OK);
 }
 
 // Сокращенный вариант функции сообщения диалоговому окну
@@ -230,39 +232,31 @@ int OpenDevices(void) {
 	Res = midiOutOpen(&Out, DevN - 1, 0, 0, 0);
 
 	if (Res != MMSYSERR_NOERROR) {
-		Error(L"Невозможно открыть устройство вывода");
+		Error(ERR_MSG_MIDI___DEVICE);
 		return FALSE;
 	}
 
 	PatchChange();               // Выберем текущий тембр
 	return TRUE;
 }
-
-BOOL PlaybackFile();
-// Загрузка файла
-BOOL LoadFile(const wchar_t* filename) {
-	std::wstring wFilename = std::wstring(filename);
-	TargetMidi = MidiFile();
-	targetMidiError = FALSE;
-	if (targetMidiError = !TargetMidi.ParseFile(wFilename))
-	{
-		return FALSE;
-	}
-	PlaybackFile();
-	return TRUE;
-}
-
+std::atomic<bool> playbackCancel;
+std::mutex awakeMutex;	
+std::condition_variable sleepLock;
+// Класс функции проигрывания трека (для использования потоками)
 class PlaybackTrack {
 public:
-	void operator()(const MidiTrack & midiTrk) {
+	void operator()(const MidiTrack& midiTrk) {
 		long int eventsNum = midiTrk.vecEvents.size();
 		for (long int nEvent = 0; nEvent < eventsNum; nEvent++)
 		{
 			uint32_t sleepTime = midiTrk.vecEvents[nEvent].nDeltaTick;
 			if (sleepTime != 0) {
-				sleepTime = (uint32_t)TargetMidi.m_nTempo/(uint32_t)1000 * sleepTime / (uint32_t)TargetMidi.m_nDivision;
+				sleepTime = (uint32_t)TargetMidi.m_nTempo / (uint32_t)1000 * sleepTime / (uint32_t)TargetMidi.m_nDivision;
 			}
-			std::this_thread::sleep_for(std::chrono::milliseconds(sleepTime));
+			std::unique_lock<std::mutex> lock(awakeMutex);
+			sleepLock.wait_for(lock,
+				std::chrono::milliseconds(sleepTime),
+				[]() { return playbackCancel.load() ? CloseDevices(), true : false; });
 			BYTE nStatus = midiTrk.vecEvents[nEvent].nStatus;
 			BYTE nKey = midiTrk.vecEvents[nEvent].nKey;
 			BYTE nVelocity = midiTrk.vecEvents[nEvent].nVelocity;
@@ -273,14 +267,15 @@ public:
 
 // Проиграть файл
 BOOL PlaybackFile() {
-	if (targetMidiError) {
+	if (PlaybackStaged || LoadMidiError) {
 		return FALSE;
 	}
+	PlaybackStaged = TRUE;
 	CloseDevices();
 	MMRESULT Res = midiOutOpen(&Out, 0, 0, 0, 0);
 	if (Res != MMSYSERR_NOERROR) {
-		Error(L"Невозможно открыть устройство вывода");
-		return FALSE;
+		Error(ERR_MSG_MIDI___DEVICE);
+		return PlaybackStaged = FALSE;
 	}
 	if (TargetMidi.m_nTempo == 0)
 		TargetMidi.m_nTempo = DEFAULT_TEMPO;
@@ -289,15 +284,31 @@ BOOL PlaybackFile() {
 	int tracksNum = TargetMidi.vecTracks.size();
 	std::vector<std::thread> threads;
 	std::vector<MidiTrack>::iterator track_it;
+	playbackCancel.store(false);
 	for (track_it = TargetMidi.vecTracks.begin(); track_it != TargetMidi.vecTracks.end(); track_it++) {
 		PlaybackTrack playbackTrackFunction;
 		threads.push_back(std::thread(playbackTrackFunction, (*track_it)));
 	}
 	std::vector<std::thread>::iterator thread_it;
 	for (thread_it = threads.begin(); thread_it != threads.end(); thread_it++) {
-		(*thread_it).join();
+		(*thread_it).detach();
 	}
-	CloseDevices();
+	return TRUE;
+}
+
+// Загрузка файла
+BOOL LoadFile(const wchar_t* filename) {
+	if (PlaybackStaged) {
+		return FALSE;
+	}
+	std::wstring wFilename = std::wstring(filename);
+	TargetMidi = MidiFile();
+	LoadMidiError = FALSE;
+	if (LoadMidiError = !TargetMidi.ParseFile(wFilename))
+	{
+		return FALSE;
+	}
+	PlaybackFile();
 	return TRUE;
 }
 
@@ -422,11 +433,11 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 	{
 		return FALSE;
 	}
-	HWND hKeyboardButton = CreateWindowW(L"BUTTON", L"MIDISensei Клавиатура", 
+	HWND hKeyboardButton = CreateWindowW(WC_BUTTONW, BTN_LABEL___MKEYB, 
 		WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON, 
 		10, 10, 200, 50, hWnd, (HMENU)IDM_OPENKEYBOARD, 
 		(HINSTANCE)GetWindowLongPtr(hWnd, GWLP_HINSTANCE), NULL);
-	HWND hPlayFileButton = CreateWindowW(L"BUTTON", L"Играть файл",
+	HWND hPlayFileButton = CreateWindowW(WC_BUTTONW, BTN_LABEL___PLAYFILE,
 		WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
 		220, 10, 175, 50, hWnd, (HMENU)IDM_PLAYFILE,
 		(HINSTANCE)GetWindowLongPtr(hWnd, GWLP_HINSTANCE), NULL);
@@ -517,14 +528,25 @@ BOOL CALLBACK PlayFileHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPa
 						GetWindowText(fnHandle, filename, fnLength);
 						filename[fnLength-1] = 0;
 						if (!LoadFile(filename)) {
-							Error(L"Не удалось загрузить файл");
+							Error(PlaybackStaged?ERR_MSG_LOAD___OVER_PLAYBACK:ERR_MSG_LOAD___OTHER);
 						};
 						delete[] filename;
+						break;
+					}
+				case IDC_PLAYBACKCANCEL_BUTTON:
+					{
+						{
+							std::lock_guard<std::mutex> lock(awakeMutex);
+							playbackCancel.store(true);
+							sleepLock.notify_all();
+						}
+						PlaybackStaged = FALSE;
 						break;
 					}
 				}
 				break;
 		}
+
 	}
 
 	return FALSE;
@@ -572,9 +594,7 @@ BOOL CALLBACK MidiKeyboard(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
 			}
 			// Заполняем список каналов
 			for (i = 0; i < 16; i++) {
-				// Преобразуем номер канала
-				std::wstring tempStr = std::to_wstring(i + 1);
-				AddStringToCB(IDC_CHANLIST, tempStr.c_str());
+				AddStringToCB(IDC_CHANLIST, wstr(i+1).c_str());
 			}
 			Channel = DlgMsg(IDC_CHANLIST, CB_SETCURSEL, 0, 0);
 			// Заполняем список тембров
@@ -584,8 +604,7 @@ BOOL CALLBACK MidiKeyboard(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
 			Patch = DlgMsg(IDC_PATCHLIST, CB_SETCURSEL, 0, 0);
 			// Заполняем список октав
 			for (i = 0; i < 11; i++) {
-				std::wstring tempStr = std::to_wstring(i);
-				AddStringToCB(IDC_OCTLIST, tempStr.c_str());
+				AddStringToCB(IDC_OCTLIST, wstr(i).c_str());
 			}
 			Octave = DlgMsg(IDC_OCTLIST, CB_SETCURSEL, 6, 0); // В начале установим 6-ю октаву
 			return TRUE;
@@ -625,7 +644,7 @@ BOOL CALLBACK MidiKeyboard(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
 					}
 					Channel = DlgMsg(controlId, CB_GETCURSEL, 0, 0);
 					if (Channel == DRUM_CHANNEL && (Octave < 2 || Octave > 4))
-						InfoMessage(L"Барабаны работают на октавах 2-4");
+						InfoMessage(INFO_MSG_DRUMS);
 					SendMessage(DlgWin, WM_SETFOCUS, 0, 0);
 					PatchChange();   
 					break;
@@ -647,7 +666,7 @@ BOOL CALLBACK MidiKeyboard(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
 					}
 					Octave = DlgMsg(controlId, CB_GETCURSEL, 0, 0);
 					if (Channel == DRUM_CHANNEL && (Octave < 2 || Octave > 4))
-						InfoMessage(L"Барабаны работают на октавах 2-4");
+						InfoMessage(INFO_MSG_DRUMS);
 					SendMessage(DlgWin, WM_SETFOCUS, 0, 0);
 					break;
 				}

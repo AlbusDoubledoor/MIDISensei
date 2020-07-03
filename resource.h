@@ -24,6 +24,7 @@
 #define IDC_LOADFILE_BUTTON             10007
 #define IDC_FILENAMEINPUT               10009
 #define IDC_PLAYFILE_BUTTON             10011
+#define IDC_PLAYBACKCANCEL_BUTTON		10013
 #define IDC_STATIC                      -1
 
 // Next default values for new objects

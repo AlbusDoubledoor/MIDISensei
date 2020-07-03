@@ -12,6 +12,10 @@
 #include <stdlib.h>
 #include <string>
 #include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <atomic>
+#include <chrono>
 #include <malloc.h>
 #include <memory.h>
 #include <tchar.h>
