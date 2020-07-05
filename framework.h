@@ -8,6 +8,7 @@
 // Файлы заголовков среды выполнения C
 #include <stdlib.h>
 #include <bitset>
+#include <map>
 #include <string>
 #include <fstream>
 #include <iostream>

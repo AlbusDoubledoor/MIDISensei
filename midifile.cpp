@@ -9,9 +9,9 @@ struct MidiEvent
 		Other
 	} event;
 	uint8_t nStatus = 0;
-	uint8_t nKey = 0;
-	uint8_t nVelocity = 0;
-	uint32_t nDeltaTick = 0;
+	uint8_t nDataByteFirst = 0;
+	uint8_t nDataByteSecond = 0;
+	uint32_t nDelayTime = 0;
 };
 
 struct MidiTrack
@@ -21,6 +21,12 @@ struct MidiTrack
 	std::vector<MidiEvent> vecEvents;
 };
 
+struct TimeSignature {
+	uint8_t nNumerator = 0;
+	uint8_t nDenominator = 0;
+	uint8_t nMidiClocks = 24;
+	uint8_t n32per24 = 8;
+};
 
 class MidiFile
 {
@@ -80,15 +86,16 @@ public:
 			fileName += (char)sFileName[idx];
 		}
 		log << "Filename: " << fileName << std::endl;
-		// Функции смены нужны для того, чтобы выставить биты в нужном порядке, 
-		// так как в .MID файлах используется Big-Endian (сначала старший байт, потом младший)
-		// Смена порядка следования битов для 32-битного числа
+		// Функции смены нужны для того, чтобы выставить байты в нужном порядке, 
+		// так как в .MID файлах используется Big-Endian (от старшего байта к младшему)
+		// А многобайтные данные заголовка будем считывать в интеловский little-endian
+		// Смена порядка следования битов для 32-битного значения
 		auto Swap32 = [](uint32_t n)
 		{
 			return (((n >> 24) & 0xff) | ((n << 8) & 0xff0000) | ((n >> 8) & 0xff00) | ((n << 24) & 0xff000000));
 		};
 
-		// Смена порядка следования битов для 16-битного числа
+		// Смена порядка следования битов для 16-битного значения
 		auto Swap16 = [](uint16_t n)
 		{
 			return ((n >> 8) | (n << 8));
@@ -135,14 +142,16 @@ public:
 		uint32_t nHeaderLength = Swap32(n32);
 		ifs.read((char*)&n16, sizeof(uint16_t));
 		m_nFormat = Swap16(n16);
-		log << "MIDI Format: " << std::to_string(m_nFormat) << std::endl;
+		log << "MIDI Format: " << str(m_nFormat) << std::endl;
 		ifs.read((char*)&n16, sizeof(uint16_t));
 		uint16_t nTrackChunks = Swap16(n16);
+		log << "Tracks number: " << str(nTrackChunks) << std::endl;
 		ifs.read((char*)&n16, sizeof(uint16_t));
 		m_nDivision = Swap16(n16);
+		log << "Ticks per quarter note: " << str(m_nDivision) << std::endl;
 
 		// Считываем MIDI треки
-		for (uint16_t nChunk = 0; nChunk < nTrackChunks; nChunk++)
+		for (uint16_t nChunk = 0; nChunk < nTrackChunks; ++nChunk)
 		{
 			log << "===== TRACK #" << nChunk+1 << "=====" << std::endl;
 			// Заголовок MIDI трека
@@ -336,10 +345,86 @@ public:
 		return true;
 	}
 
+	bool ExplodeFile(std::wstring sFileName) {
+		std::ofstream ofs;
+		ofs.open(sFileName, std::fstream::out | std::ios_base::binary);
+		
+		// Разделение на байты для записи 2 байта
+		auto nibbleIt = [&ofs](uint16_t target) {
+			uint8_t leftNibble = (target & 0xFF00) >> 8;
+			uint8_t rightNibble = target & 0x00FF;
+			ofs.put(leftNibble);
+			ofs.put(rightNibble);
+		};
+		// Разделение на байты для записи 4 байта
+		auto fourNibbleIt = [nibbleIt, &ofs](uint32_t target) {
+			uint16_t leftNibble = (target & 0xFFFF0000) >> 16;
+			nibbleIt(leftNibble);
+			uint16_t rightNibble = target & 0x0000FFFF;
+			nibbleIt(rightNibble);
+		};
+		// Пишем MIDI заголовок
+		ofs.put('M');
+		ofs.put('T');
+		ofs.put('h');
+		ofs.put('d');
+		for (short i = 0; i < 3; ++i) {
+			ofs.put(0x00);
+		}
+		ofs.put(0x06);
+		// async не поддерживаются
+		ofs.put(0x00);
+		if (vecTracks.size() > 1) {
+			ofs.put(0x01);
+		}
+		else {
+			ofs.put(0x00);
+		}
+		nibbleIt((uint16_t)vecTracks.size());
+		nibbleIt(m_nDivision);
+		std::ofstream log;
+		log.open("logging.log", std::fstream::out);
+		for (size_t i = 0; i < vecTracks.size(); ++i) {
+			MidiTrack currentTrack = vecTracks[i];
+			uint8_t nPrevStatus = 0;
+			ofs.put('M');
+			ofs.put('T');
+			ofs.put('r');
+			ofs.put('k');
+			fourNibbleIt(currentTrack.vecEvents.size());
+			for (size_t j = 0; j < currentTrack.vecEvents.size(); ++j)
+			{
+				MidiEvent currentEvent = currentTrack.vecEvents[j];
+				uint32_t deltaTime = currentEvent.nDelayTime;
+				if (m_nTempo == 0)
+				{
+					m_nTempo = DEFAULT_TEMPO;
+				}
+				deltaTime = (uint32_t)m_nDivision*deltaTime*(uint32_t)1000 / m_nTempo;
+				do
+				{
+					ofs.put(((deltaTime & 0x7F000000)|0x80000000) >> 24);
+					deltaTime <<= 8;
+				} while ((deltaTime & 0x7F000000) > 0);
+				
+				if (nPrevStatus != currentEvent.nStatus)
+					ofs.put(currentEvent.nStatus);
+				ofs.put(currentEvent.nDataByteFirst);
+				ofs.put(currentEvent.nDataByteSecond);
+				nPrevStatus = currentEvent.nStatus;
+			}
+			ofs.put(0x00);
+			fourNibbleIt(0xFF2F);
+		}
+		ofs.close();
+		return true;
+	}
+
 public:
 	std::vector<MidiTrack> vecTracks;
 	uint32_t m_nTempo = 0;
 	uint32_t m_nBPM = 0;
 	uint16_t m_nDivision = 0;
 	uint16_t m_nFormat = 0;
+	TimeSignature m_nTimeSignature;
 };

@@ -10,10 +10,14 @@ UINT Patch;										// Номер тембра
 UINT Octave;									// Октава - 0-10
 HWND DlgKeyb;									// Ключ диалогового окна MIDI клавиатуры
 HWND DlgPlay;									// Ключ диалогового окна проигрывания файла
-MidiFile TargetMidi;							// Целевой миди-файл
+HWND DlgRec;									// Ключ диалогового окна записи файла
+MidiFile PlayMidifile;							// midi-файл для проигрывания
+MidiFile RecordMidifile;						// midi-файл для записи
+UINT CurrentRecordTrack;						// Текущий записываемый трек
 BOOL LoadStaged = FALSE;						// Статус загрузки файла (файл загружен)
 BOOL PlaybackStaged = FALSE;					// Статус подготовки Playback (файл проигрывается)
 BOOL LoadMidiError = FALSE;						// Статус загрузки midi-файла
+BOOL KeyboardWindowOpened = FALSE;				// Статус - открыто немодальное диалоговое окно с клавиатурой
 
 
 // Константы:
@@ -150,6 +154,35 @@ const wchar_t* PatchNames[] = {
   L"Gunshot",
 };
 
+std::map<BYTE,std::wstring> EventTypesMap = {
+	{0x80,L"Note Off"},
+	{0x90,L"Note On"},
+	{0xA0,L"Aftertouch"},
+	{0xB0,L"Control Change"},
+	{0xC0,L"Program Change"},
+	{0xD0,L"Channel Pressure"},
+	{0xE0,L"Pitch Bend"}
+};
+
+const wchar_t* EventNames[] = {
+	L"Note Off",
+	L"Note On",
+	L"Aftertouch",
+	L"Control Change",
+	L"Program Change",
+	L"Channel Pressure",
+	L"Pitch Bend"
+};
+
+BYTE EventTypes[] = {
+	0x80,
+	0x90,
+	0xA0,
+	0xB0,
+	0xC0,
+	0xD0,
+	0xE0
+};
 // Функции:
 
 // Выдача сообщения об ошибке
@@ -165,6 +198,11 @@ void InfoMessage(const wchar_t* Text) {
 // Добавление строки в ComboBox диалога
 void AddStringToCB(HWND hDlg,UINT Ctl, const wchar_t* Str) {
 	SendDlgItemMessage(hDlg,Ctl, CB_ADDSTRING, 0, (LPARAM)Str);
+}
+
+// Удаление строки из ComboBox диалога
+void RemoveStringFromCB(HWND hDlg, UINT Ctl, UINT position) {
+	SendDlgItemMessage(hDlg, Ctl, CB_DELETESTRING, position, 0);
 }
 
 // Посылка сообщения на открытое устройство
@@ -196,7 +234,7 @@ void PatchChange(void) {
 	}
 	int i;
 	PATCHARRAY Patches;           // Массив включенных тембров
-	for (i = 0; i < MIDIPATCHSIZE; i++) {
+	for (i = 0; i < MIDIPATCHSIZE; ++i) {
 		Patches[i] = 0;            // Обнуляем массив тембров
 	}
 	Patches[Patch] = 0xFFFF;     // Включим тембр для всех каналов
@@ -228,7 +266,11 @@ int OpenDevices(HWND hDlg,int controlId) {
 		Error(ERR_MSG_MIDI___DEVICE);
 		return FALSE;
 	}
-
+	switch (controlId) {
+		case IDC_MIDIOUT_PLAY:
+		case IDC_MIDIOUT_RECORD:
+			Patch = 0;
+	}
 	PatchChange();               // Выберем текущий тембр
 	return TRUE;
 }
@@ -253,21 +295,21 @@ std::condition_variable sleepLock;	// слип в потоках
 // Класс функции проигрывания трека (для использования потоками)
 class PlaybackTrack {
 public:
-	void operator()(const MidiTrack& midiTrk) {
+	void operator()(const MidiTrack& midiTrk, const uint32_t tempo, const uint32_t division, bool tickTransformation) {
 		long int eventsNum = midiTrk.vecEvents.size();
-		for (long int nEvent = 0; nEvent < eventsNum; nEvent++)
+		for (long int nEvent = 0; nEvent < eventsNum; ++nEvent)
 		{
-			uint32_t sleepTime = midiTrk.vecEvents[nEvent].nDeltaTick;
-			if (sleepTime != 0) {
-				sleepTime = (uint32_t)TargetMidi.m_nTempo / (uint32_t)1000 * sleepTime / (uint32_t)TargetMidi.m_nDivision;
+			uint32_t sleepTime = midiTrk.vecEvents[nEvent].nDelayTime;
+			if (sleepTime != 0 && tickTransformation) {
+				sleepTime = tempo / (uint32_t)1000 * sleepTime / division;
 			}
 			std::unique_lock<std::mutex> lock(awakeMutex);
 			sleepLock.wait_for(lock,
 				std::chrono::milliseconds(sleepTime),
 				[]() { return playbackCancel.load() ? CloseDevices(), true : false; });
 			BYTE nStatus = midiTrk.vecEvents[nEvent].nStatus;
-			BYTE nKey = midiTrk.vecEvents[nEvent].nKey;
-			BYTE nVelocity = midiTrk.vecEvents[nEvent].nVelocity;
+			BYTE nKey = midiTrk.vecEvents[nEvent].nDataByteFirst;
+			BYTE nVelocity = midiTrk.vecEvents[nEvent].nDataByteSecond;
 			midiOutShortMsg(Out, (((nVelocity << 8) | nKey) << 8) | nStatus);
 		}
 		activeTracks--;
@@ -304,22 +346,22 @@ BOOL PlaybackFile() {
 		return PlaybackStaged = FALSE;
 	}
 
-	if (TargetMidi.m_nTempo == 0)
-		TargetMidi.m_nTempo = DEFAULT_TEMPO;
-	if (TargetMidi.m_nBPM == 0)
-		TargetMidi.m_nBPM = DEFAULT_BPM;
+	if (PlayMidifile.m_nTempo == 0)
+		PlayMidifile.m_nTempo = DEFAULT_TEMPO;
+	if (PlayMidifile.m_nBPM == 0)
+		PlayMidifile.m_nBPM = DEFAULT_BPM;
 
 	std::vector<std::thread> threads;
 	std::vector<MidiTrack>::iterator track_it;
 	playbackCancel.store(false);
 	activeTracks.store(0);
-	for (track_it = TargetMidi.vecTracks.begin(); track_it != TargetMidi.vecTracks.end(); track_it++) {
+	for (track_it = PlayMidifile.vecTracks.begin(); track_it != PlayMidifile.vecTracks.end(); ++track_it) {
 		activeTracks++;
 		PlaybackTrack playbackTrackFunction;
-		threads.push_back(std::thread(playbackTrackFunction, (*track_it)));
+		threads.push_back(std::thread(playbackTrackFunction, (*track_it),PlayMidifile.m_nTempo,PlayMidifile.m_nDivision,true));
 	}
 	std::vector<std::thread>::iterator thread_it;
-	for (thread_it = threads.begin(); thread_it != threads.end(); thread_it++) {
+	for (thread_it = threads.begin(); thread_it != threads.end(); ++thread_it) {
 		(*thread_it).detach();
 	}
 	return TRUE;
@@ -332,9 +374,9 @@ BOOL LoadFile(const wchar_t* filename) {
 	}
 	LoadStaged = FALSE;
 	std::wstring wFilename = std::wstring(filename);
-	TargetMidi = MidiFile();
+	PlayMidifile = MidiFile();
 	LoadMidiError = FALSE;
-	if (LoadMidiError = !TargetMidi.ParseFile(wFilename))
+	if (LoadMidiError = !PlayMidifile.ParseFile(wFilename))
 	{
 		return FALSE;
 	}
@@ -353,12 +395,34 @@ void PlaybackCancel() {
 	PlaybackStaged = FALSE;
 }
 
+
+// Получение значения числового поля
+long int GetEditFieldInt(HWND hDlg,int controlId) {
+	HWND fieldHandle = GetDlgItem(hDlg, controlId);
+	int fieldLen = GetWindowTextLength(fieldHandle)+1;
+	if (fieldLen == 1) {
+		return 0;
+	}
+	wchar_t* fieldValue = new wchar_t[fieldLen];
+	GetWindowText(fieldHandle, fieldValue, fieldLen);
+	fieldValue[fieldLen - 1] = 0;
+	long int fieldValueIntS = std::stoi(fieldValue);
+	delete[] fieldValue;
+	return fieldValueIntS;
+}
+
+// Проверка на байт при вводе числа
+BOOL IsByteInput(long int input) {
+	return input >= 0 && input <= 127;
+}
+
 ATOM                MidiSenseiRegisterClass(HINSTANCE hInstance);
 BOOL                InitInstance(HINSTANCE, int);
 LRESULT CALLBACK    WndProc(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK    DefaultDlgHandler(HWND, UINT, WPARAM, LPARAM);
 BOOL CALLBACK    MidiKeyboard(HWND, UINT, WPARAM, LPARAM);
 BOOL CALLBACK    PlayFileHandler(HWND, UINT, WPARAM, LPARAM);
+BOOL CALLBACK    RecordFileHandler(HWND, UINT, WPARAM, LPARAM);
 
 int APIENTRY wWinMain(HINSTANCE hInstance,
 	HINSTANCE hPrevInstance,
@@ -389,7 +453,7 @@ int APIENTRY wWinMain(HINSTANCE hInstance,
 		UINT Msg = msg.message;
 		UINT wParam = msg.wParam;
 		UINT lParam = msg.lParam;
-		if (Out&&(Msg == WM_KEYUP || Msg == WM_KEYDOWN))
+		if (KeyboardWindowOpened&&(Msg == WM_KEYUP || Msg == WM_KEYDOWN))
 		{
 			/*2 3   5 6 7 - на октаву выше
 				Q W E R T Y U
@@ -469,6 +533,11 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 		WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
 		220, 10, 175, 50, hWnd, (HMENU)IDM_PLAYFILE,
 		(HINSTANCE)GetWindowLongPtr(hWnd, GWLP_HINSTANCE), NULL);
+	// Кнопка открытия проигрывателя
+	HWND hRecFileButton = CreateWindowW(WC_BUTTONW, BTN_LABEL___RECORDFILE,
+		WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
+		405, 10, 175, 50, hWnd, (HMENU)IDM_RECORDFILE,
+		(HINSTANCE)GetWindowLongPtr(hWnd, GWLP_HINSTANCE), NULL);
 	ShowWindow(hWnd, nCmdShow);
 	UpdateWindow(hWnd);
 
@@ -492,12 +561,28 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			DestroyWindow(hWnd);
 			break;
 		case IDM_OPENKEYBOARD:
+			if (KeyboardWindowOpened)
+			{
+				break; // Если открыто немодальное окно с клавиатурой, то не реагируем
+			}
 			// Делаем немодальное окно для обработки клавиш в фоновом режиме в основном окне
 			DlgKeyb = CreateDialog(hInst, MAKEINTRESOURCE(IDD_KEYBOARDDIALOG), hWnd, MidiKeyboard);
 			ShowWindow(DlgKeyb, SW_SHOW);
+			KeyboardWindowOpened = TRUE;
 			break;
 		case IDM_PLAYFILE:
+			if (KeyboardWindowOpened)
+			{
+				break; 
+			}
 			DialogBox(hInst, MAKEINTRESOURCE(IDD_PLAYFILEDIALOG), hWnd, PlayFileHandler);
+			break;
+		case IDM_RECORDFILE:
+			if (KeyboardWindowOpened)
+			{
+				break;
+			}
+			DialogBox(hInst, MAKEINTRESOURCE(IDD_RECORDFILEDIALOG), hWnd, RecordFileHandler);
 			break;
 		default:
 			return DefWindowProc(hWnd, message, wParam, lParam);
@@ -521,6 +606,188 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 	return 0;
 }
 
+// Обработчик сообщений для окна "Запись файла"
+BOOL CALLBACK RecordFileHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) {
+	UNREFERENCED_PARAMETER(lParam);
+	DlgRec = hDlg;
+	UINT controlId = LOWORD(wParam);
+	switch (message) {
+		case WM_INITDIALOG:
+		{
+			// Инициализация устройств
+			InitMidiDevices(hDlg, IDC_MIDIOUT_RECORD);
+			// Инициализация файла
+		    RecordMidifile = MidiFile();
+			// Заполняем список каналов
+			for (int i = 0; i < 16; ++i) {
+				AddStringToCB(hDlg, IDC_CHANNELS_CB, wstr(i + 1).c_str());
+			}
+			SendDlgItemMessage(hDlg, IDC_CHANNELS_CB, CB_SETCURSEL, 0, 0);
+			// Добавляем трек в список треков
+			AddStringToCB(hDlg, IDC_TRACKS_CB, wstr(1).c_str());
+			SendDlgItemMessage(hDlg, IDC_TRACKS_CB, CB_SETCURSEL, 0, 1);
+			RecordMidifile.vecTracks.push_back(MidiTrack());
+			// Добавляем типы событий
+			for (int i = 0; i < 7; ++i) {
+				AddStringToCB(hDlg, IDC_EVENTS_CB, EventNames[i]);
+			}
+			SendDlgItemMessage(hDlg, IDC_EVENTS_CB, CB_SETCURSEL, 0, 0);
+			break;
+		}
+		case WM_COMMAND:
+			switch (controlId) {
+				case IDOK:
+				case IDCANCEL:
+					{
+						EndDialog(hDlg, LOWORD(lParam));
+						return TRUE;
+					}
+					break;
+				case IDC_ADDTRACK_BTN:
+				{
+					RecordMidifile.vecTracks.push_back(MidiTrack());
+					AddStringToCB(hDlg, IDC_TRACKS_CB, wstr(RecordMidifile.vecTracks.size()).c_str());
+					break;
+				}
+				case IDC_DELTRACK_BTN:
+				{
+					if (RecordMidifile.vecTracks.size() == 1) {
+						Error(ERR_MSG_DELETELAST);
+						break;
+					}
+					UINT trackToRemove = SendDlgItemMessage(hDlg, IDC_TRACKS_CB, CB_GETCURSEL, 0, 0);
+					RecordMidifile.vecTracks.erase(RecordMidifile.vecTracks.begin() + trackToRemove);
+					SendDlgItemMessage(hDlg, IDC_TRACKS_CB, CB_RESETCONTENT, 0, 0);
+					// Обновляем список треков
+					for (size_t i = 0; i < RecordMidifile.vecTracks.size(); ++i) {
+						AddStringToCB(hDlg, IDC_TRACKS_CB, wstr(i + 1).c_str());
+					}
+					SendDlgItemMessage(hDlg, IDC_TRACKS_CB, CB_SETCURSEL, trackToRemove,0);
+					break;
+				}
+				case IDC_TRACKS_CB: {
+					if (HIWORD(wParam) != CBN_SELENDOK) {
+						break;
+					}
+					CurrentRecordTrack = SendDlgItemMessage(hDlg, IDC_TRACKS_CB, CB_GETCURSEL, 0, 0);
+					SendDlgItemMessage(hDlg, IDC_TRACKEVENTS_CB, CB_RESETCONTENT, 0, 0);
+					int trkEventsNum = RecordMidifile.vecTracks[CurrentRecordTrack].vecEvents.size();
+					std::wstring trackEvents;
+					for (int i = 0; i < trkEventsNum; ++i) {
+						MidiEvent nEvent = RecordMidifile.vecTracks[CurrentRecordTrack].vecEvents[i];
+						uint8_t nStatus = nEvent.nStatus;
+						trackEvents.clear();
+						trackEvents = EventTypesMap[(nStatus & 0xF0)];
+						trackEvents += L" | Канал: " + std::to_wstring((nStatus & 0x0F) + 1);
+						trackEvents += L" | Задержка: " + std::to_wstring(nEvent.nDelayTime) + L" ms";
+						trackEvents += L" | Данные: " + std::to_wstring(nEvent.nDataByteFirst);
+						trackEvents += L" | " + std::to_wstring(nEvent.nDataByteSecond);
+						AddStringToCB(hDlg, IDC_TRACKEVENTS_CB, trackEvents.c_str());
+					}
+					break;
+				}
+				case IDC_MIDIOUT_RECORD:
+				{
+					if (HIWORD(wParam) != CBN_SELENDOK || !playbackCancel.load()) {
+						break;
+					}
+					CloseDevices();
+					OpenDevices(hDlg, IDC_MIDIOUT_RECORD);
+					break;
+				}
+				case IDC_INSERTEVENT_BTN: {
+					UINT nChannel = SendDlgItemMessage(hDlg, IDC_CHANNELS_CB, CB_GETCURSEL, 0, 0);
+					UINT nEventType = SendDlgItemMessage(hDlg, IDC_EVENTS_CB, CB_GETCURSEL, 0, 0);
+					uint8_t nStatus = EventTypes[nEventType]|nChannel;
+					long int tmpFieldValue = 0;
+					tmpFieldValue = GetEditFieldInt(hDlg, IDC_EDIT_DATABYTE_FIRST);
+					if (!IsByteInput(tmpFieldValue)) {
+						Error(ERR_MSG_BYTEINPUT);
+						break;
+					};
+					uint8_t nDataByteFirst = tmpFieldValue & 0xff;
+
+					tmpFieldValue = GetEditFieldInt(hDlg, IDC_EDIT_DATABYTE_SECOND);
+					if (!IsByteInput(tmpFieldValue)) {
+						Error(ERR_MSG_BYTEINPUT);
+						break;
+					};
+					uint8_t nDataByteSecond = tmpFieldValue & 0xff;
+
+					uint32_t nDelayTime = GetEditFieldInt(hDlg,IDC_EDIT_DELAYTIME);
+					if (RecordMidifile.vecTracks[CurrentRecordTrack].vecEvents.size() == 0) {
+						RecordMidifile.vecTracks[CurrentRecordTrack].vecEvents.push_back({ MidiEvent::Type::Other, nStatus, nDataByteFirst, nDataByteSecond, nDelayTime });
+					}
+					else {
+						UINT posInsert = SendDlgItemMessage(hDlg, IDC_TRACKEVENTS_CB, CB_GETCURSEL, 0, 0);
+						if (posInsert == -1)
+							posInsert = 0;
+						RecordMidifile.vecTracks[CurrentRecordTrack].vecEvents.insert(RecordMidifile.vecTracks[CurrentRecordTrack].vecEvents.begin() + posInsert, { MidiEvent::Type::Other, nStatus, nDataByteFirst, nDataByteSecond, nDelayTime });
+					}
+					std::wstring trackEvents = EventNames[nEventType];
+					trackEvents += L" | Канал: " + std::to_wstring(nChannel + 1);
+					trackEvents += L" | Задержка: " + std::to_wstring(nDelayTime) + L" ms";
+					trackEvents += L" | Данные: " + std::to_wstring(nDataByteFirst);
+					trackEvents += L" | " + std::to_wstring(nDataByteSecond);
+					AddStringToCB(hDlg, IDC_TRACKEVENTS_CB, trackEvents.c_str());
+					break;
+				}
+				case IDC_DELEVENT_BUTTON:
+				{
+					if (RecordMidifile.vecTracks[CurrentRecordTrack].vecEvents.size() == 0)
+					{
+						break;
+					}
+					UINT eventToRemove = SendDlgItemMessage(hDlg, IDC_TRACKEVENTS_CB, CB_GETCURSEL, 0, 0);
+					RecordMidifile.vecTracks[CurrentRecordTrack].vecEvents.erase(RecordMidifile.vecTracks[CurrentRecordTrack].vecEvents.begin() + eventToRemove);
+					RemoveStringFromCB(hDlg, IDC_TRACKEVENTS_CB, eventToRemove);
+					break;
+				}
+				case IDC_CREATEFILE_BTN:
+				{
+					RecordMidifile.m_nDivision = (uint16_t)GetEditFieldInt(hDlg, IDC_EDIT_TICKSPERQUARTER);
+					RecordMidifile.m_nTimeSignature.nNumerator = (uint8_t)GetEditFieldInt(hDlg, IDC_EDIT_TIMESIGNATURE_ENUM);
+					RecordMidifile.m_nTimeSignature.nDenominator = (uint8_t)(2 >> GetEditFieldInt(hDlg, IDC_EDIT_TIMESIGNATURE_DENUM));
+					HWND fnHandle = GetDlgItem(hDlg, IDC_RECORD_FILENAME);
+					int fnLength = GetWindowTextLength(fnHandle) + 1;
+					wchar_t* filename = new wchar_t[fnLength];
+					GetWindowText(fnHandle, filename, fnLength);
+					filename[fnLength - 1] = 0;
+					if (!RecordMidifile.ExplodeFile(std::wstring(filename)))
+					{
+						Error(ERR_MSG_LOAD___OTHER);
+					}
+					delete[] filename;
+					break;
+				}
+				case IDC_PLAYTRACK_BTN:
+				{
+					if (PlaybackStaged)
+					{
+						Error(ERR_MSG_PLAY___OVER_PLAYBACK);
+						break;
+					}
+					CloseDevices();
+					if (!OpenDevices(hDlg, IDC_MIDIOUT_RECORD)) {
+						break;
+					};
+					PlaybackTrack playOneTrackFunction;
+					PlaybackStaged = TRUE;
+					playbackCancel.store(false);
+					activeTracks.store(1);
+					std::thread(playOneTrackFunction, RecordMidifile.vecTracks[CurrentRecordTrack],0, 0, false).detach();
+					break;
+				}
+				case IDC_CANCELTRACK_BTN:
+				{
+					PlaybackCancel();
+					break;
+				}
+			}
+			break;
+	}
+	return FALSE;
+}
 // Обработчик сообщений для окна "Играть файл".
 BOOL CALLBACK PlayFileHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 {
@@ -640,17 +907,17 @@ BOOL CALLBACK MidiKeyboard(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
 			InitMidiDevices(hDlg,IDC_MIDIOUT);
 			int i;
 			// Заполняем список каналов
-			for (i = 0; i < 16; i++) {
+			for (i = 0; i < 16; ++i) {
 				AddStringToCB(hDlg,IDC_CHANLIST, wstr(i+1).c_str());
 			}
 			Channel = SendDlgItemMessage(hDlg,IDC_CHANLIST, CB_SETCURSEL, 0, 0);
 			// Заполняем список тембров
-			for (i = 0; i < 128; i++) {
+			for (i = 0; i < 128; ++i) {
 				AddStringToCB(hDlg,IDC_PATCHLIST, PatchNames[i]);
 			}
 			Patch = SendDlgItemMessage(hDlg,IDC_PATCHLIST, CB_SETCURSEL, 0, 0);
 			// Заполняем список октав
-			for (i = 0; i < 11; i++) {
+			for (i = 0; i < 11; ++i) {
 				AddStringToCB(hDlg,IDC_OCTLIST, wstr(i).c_str());
 			}
 			// В начале установим 6-ю октаву
@@ -666,7 +933,7 @@ BOOL CALLBACK MidiKeyboard(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
 				{
 					CloseDevices();
 					EndDialog(hDlg, LOWORD(wParam));
-					DlgKeyb = NULL;
+					KeyboardWindowOpened = FALSE;
 					return TRUE;
 				}
 				case IDC_RESET:
