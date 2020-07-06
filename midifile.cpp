@@ -346,17 +346,18 @@ public:
 	}
 
 	bool ExplodeFile(std::wstring sFileName) {
-		std::ofstream ofs;
+		std::ofstream ofs,log;
 		ofs.open(sFileName, std::fstream::out | std::ios_base::binary);
-		
-		// Разделение на байты для записи 2 байта
+		if (!ofs.is_open())
+			return false;
+		// Разделение на байты для записи // 2 байта
 		auto nibbleIt = [&ofs](uint16_t target) {
 			uint8_t leftNibble = (target & 0xFF00) >> 8;
 			uint8_t rightNibble = target & 0x00FF;
 			ofs.put(leftNibble);
 			ofs.put(rightNibble);
 		};
-		// Разделение на байты для записи 4 байта
+		// Разделение на байты для записи // 4 байта
 		auto fourNibbleIt = [nibbleIt, &ofs](uint32_t target) {
 			uint16_t leftNibble = (target & 0xFFFF0000) >> 16;
 			nibbleIt(leftNibble);
@@ -364,57 +365,59 @@ public:
 			nibbleIt(rightNibble);
 		};
 		// Пишем MIDI заголовок
-		ofs.put('M');
-		ofs.put('T');
-		ofs.put('h');
-		ofs.put('d');
-		for (short i = 0; i < 3; ++i) {
-			ofs.put(0x00);
-		}
-		ofs.put(0x06);
-		// async не поддерживаются
-		ofs.put(0x00);
-		if (vecTracks.size() > 1) {
-			ofs.put(0x01);
-		}
-		else {
-			ofs.put(0x00);
-		}
+		ofs.write(MIDI_FILE_HEADER, sizeof(uint32_t));
+		fourNibbleIt(0x00000006);
+		nibbleIt(0x0001);
 		nibbleIt((uint16_t)vecTracks.size());
-		nibbleIt(m_nDivision);
-		std::ofstream log;
-		log.open("logging.log", std::fstream::out);
-		for (size_t i = 0; i < vecTracks.size(); ++i) {
-			MidiTrack currentTrack = vecTracks[i];
+		nibbleIt((uint16_t)m_nDivision);
+		for (size_t nTrack = 0; nTrack< vecTracks.size(); ++nTrack) {
+			MidiTrack currentTrack = vecTracks[nTrack];
 			uint8_t nPrevStatus = 0;
-			ofs.put('M');
-			ofs.put('T');
-			ofs.put('r');
-			ofs.put('k');
+			ofs.write(MIDI_TRACK_HEADER, sizeof(uint32_t));
 			fourNibbleIt(currentTrack.vecEvents.size());
-			for (size_t j = 0; j < currentTrack.vecEvents.size(); ++j)
-			{
-				MidiEvent currentEvent = currentTrack.vecEvents[j];
-				uint32_t deltaTime = currentEvent.nDelayTime;
+			if (nTrack == 0) {
+				// Пишем основные мета-данные: темп, размерность такта, синхронизацию
 				if (m_nTempo == 0)
 				{
 					m_nTempo = DEFAULT_TEMPO;
 				}
+				ofs.put(0x00);
+				ofs.put(0xFF);
+				ofs.put(0x51);
+				fourNibbleIt(m_nTempo|0x03000000);
+			}
+			for (size_t nEvent = 0; nEvent < currentTrack.vecEvents.size(); ++nEvent)
+			{
+				MidiEvent currentEvent = currentTrack.vecEvents[nEvent];
+				uint32_t deltaTime = currentEvent.nDelayTime;
 				deltaTime = (uint32_t)m_nDivision*deltaTime*(uint32_t)1000 / m_nTempo;
-				do
-				{
-					ofs.put(((deltaTime & 0x7F000000)|0x80000000) >> 24);
-					deltaTime <<= 8;
-				} while ((deltaTime & 0x7F000000) > 0);
-				
+				BYTE bytes[4] = { 0 };
+				bytes[0] = (BYTE)((deltaTime >> 21) & 0x7f); 
+				bytes[1] = (BYTE)((deltaTime >> 14) & 0x7f);
+				bytes[2] = (BYTE)((deltaTime >> 7) & 0x7f);
+				bytes[3] = (BYTE)(deltaTime & 0x7f);
+				int start = 0;
+				while ((start < 4) && (bytes[start] == 0))  start++;
+
+				for (int i = start; i < 3; i++) {
+					bytes[i] = bytes[i] | 0x80;
+					ofs.put(bytes[i]);
+				}
+				ofs.put(bytes[3]);
+				// Running status
 				if (nPrevStatus != currentEvent.nStatus)
+				{
 					ofs.put(currentEvent.nStatus);
-				ofs.put(currentEvent.nDataByteFirst);
-				ofs.put(currentEvent.nDataByteSecond);
+					ofs.put(currentEvent.nDataByteFirst);
+					ofs.put(currentEvent.nDataByteSecond);
+				}
+				else {
+					ofs.put(currentEvent.nDataByteFirst);
+					ofs.put(currentEvent.nDataByteSecond);
+				}
 				nPrevStatus = currentEvent.nStatus;
 			}
-			ofs.put(0x00);
-			fourNibbleIt(0xFF2F);
+			fourNibbleIt(0x00FF2F00);
 		}
 		ofs.close();
 		return true;

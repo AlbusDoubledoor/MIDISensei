@@ -14,7 +14,6 @@
 #define IDC_MIDISENSEI                  109
 #define IDR_MAINFRAME                   128
 #define IDC_EDIT_BPM                    1004
-#define IDC_EDIT_TEMPO                  1005
 #define IDC_EDIT_TIMESIGNATURE          1006
 #define IDC_ADDTRACK_BTN                1007
 #define IDC_DELTRACK_BTN                1008

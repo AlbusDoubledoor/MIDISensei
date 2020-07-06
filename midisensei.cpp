@@ -746,6 +746,16 @@ BOOL CALLBACK RecordFileHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 				case IDC_CREATEFILE_BTN:
 				{
 					RecordMidifile.m_nDivision = (uint16_t)GetEditFieldInt(hDlg, IDC_EDIT_TICKSPERQUARTER);
+					if (RecordMidifile.m_nDivision == 0) {
+						Error(ERR_MSG_TICKS_NULL);
+						break;
+					}
+					long int bpm = GetEditFieldInt(hDlg, IDC_EDIT_BPM);
+					RecordMidifile.m_nTempo = (uint32_t)(60000000/bpm);
+					if (RecordMidifile.m_nTempo == 0) {
+						Error(ERR_MSG_TEMPO_NULL);
+						break;
+					}
 					RecordMidifile.m_nTimeSignature.nNumerator = (uint8_t)GetEditFieldInt(hDlg, IDC_EDIT_TIMESIGNATURE_ENUM);
 					RecordMidifile.m_nTimeSignature.nDenominator = (uint8_t)(2 >> GetEditFieldInt(hDlg, IDC_EDIT_TIMESIGNATURE_DENUM));
 					HWND fnHandle = GetDlgItem(hDlg, IDC_RECORD_FILENAME);
