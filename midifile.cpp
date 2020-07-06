@@ -89,13 +89,14 @@ public:
 		// Функции смены нужны для того, чтобы выставить байты в нужном порядке, 
 		// так как в .MID файлах используется Big-Endian (от старшего байта к младшему)
 		// А многобайтные данные заголовка будем считывать в интеловский little-endian
-		// Смена порядка следования битов для 32-битного значения
+
+		// Смена порядка следования байтов для 32-битного значения
 		auto Swap32 = [](uint32_t n)
 		{
 			return (((n >> 24) & 0xff) | ((n << 8) & 0xff0000) | ((n >> 8) & 0xff00) | ((n << 24) & 0xff000000));
 		};
 
-		// Смена порядка следования битов для 16-битного значения
+		// Смена порядка следования байтов для 16-битного значения
 		auto Swap16 = [](uint16_t n)
 		{
 			return ((n >> 8) | (n << 8));
@@ -138,14 +139,18 @@ public:
 		// Считываем MIDI заголовок
 		ifs.read((char*)&n32, sizeof(uint32_t));
 		uint32_t nFileID = Swap32(n32);
+		// Длина заголовка
 		ifs.read((char*)&n32, sizeof(uint32_t));
 		uint32_t nHeaderLength = Swap32(n32);
+		// Формат MIDI-файла
 		ifs.read((char*)&n16, sizeof(uint16_t));
 		m_nFormat = Swap16(n16);
 		log << "MIDI Format: " << str(m_nFormat) << std::endl;
+		// Количество трек-чанков (трек-объектов, треков)
 		ifs.read((char*)&n16, sizeof(uint16_t));
 		uint16_t nTrackChunks = Swap16(n16);
 		log << "Tracks number: " << str(nTrackChunks) << std::endl;
+		// Количество тиков на четвертную ноту
 		ifs.read((char*)&n16, sizeof(uint16_t));
 		m_nDivision = Swap16(n16);
 		log << "Ticks per quarter note: " << str(m_nDivision) << std::endl;
@@ -214,7 +219,7 @@ public:
 					uint8_t nNoteVelocity = ifs.get();
 					vecTracks[nChunk].vecEvents.push_back({ MidiEvent::Type::Other, nStatus, nNoteID, nNoteVelocity, nStatusTimeDelta });
 				}
-				// Смена устройства
+				// Смена устройства (могут быть допонлительно на синтезаторе)
 				else if ((nStatus & 0xF0) == EventName::VoiceControlChange)
 				{
 					nPreviousStatus = nStatus;
@@ -236,7 +241,7 @@ public:
 					uint8_t nChannelPressure = ifs.get();
 					vecTracks[nChunk].vecEvents.push_back({ MidiEvent::Type::Other,nStatus,nChannelPressure,0,nStatusTimeDelta });
 				}
-				// Параметры высоты звука в канале (увеличение/уменьшение базовой частоты нот), он же Pitch Wheel
+				// Параметры высоты тона в канале (увеличение/уменьшение базовой частоты нот), он же Pitch Wheel
 				else if ((nStatus & 0xF0) == EventName::VoicePitchBend)
 				{
 					nPreviousStatus = nStatus;
@@ -245,7 +250,7 @@ public:
 					vecTracks[nChunk].vecEvents.push_back({ MidiEvent::Type::Other,nStatus,nLS7B,nMS7B,nStatusTimeDelta });
 
 				}
-				// Meta- события (и SysEx)
+				// Meta- события (и SysEx - только распознаем, но не отправляем)
 				else if ((nStatus & 0xF0) == EventName::SystemExclusive)
 				{
 					nPreviousStatus = 0;
@@ -351,73 +356,91 @@ public:
 		if (!ofs.is_open())
 			return false;
 		// Разделение на байты для записи // 2 байта
-		auto nibbleIt = [&ofs](uint16_t target) {
+		auto writeTwoBytes = [&ofs](uint16_t target) {
 			uint8_t leftNibble = (target & 0xFF00) >> 8;
 			uint8_t rightNibble = target & 0x00FF;
 			ofs.put(leftNibble);
 			ofs.put(rightNibble);
 		};
 		// Разделение на байты для записи // 4 байта
-		auto fourNibbleIt = [nibbleIt, &ofs](uint32_t target) {
+		auto writeFourBytes = [writeTwoBytes, &ofs](uint32_t target) {
 			uint16_t leftNibble = (target & 0xFFFF0000) >> 16;
-			nibbleIt(leftNibble);
+			writeTwoBytes(leftNibble);
 			uint16_t rightNibble = target & 0x0000FFFF;
-			nibbleIt(rightNibble);
+			writeTwoBytes(rightNibble);
 		};
 		// Пишем MIDI заголовок
 		ofs.write(MIDI_FILE_HEADER, sizeof(uint32_t));
-		fourNibbleIt(0x00000006);
-		nibbleIt(0x0001);
-		nibbleIt((uint16_t)vecTracks.size());
-		nibbleIt((uint16_t)m_nDivision);
+		// Длина заголовока (дефолт)
+		writeFourBytes(0x00000006);
+		// Формат MIDI файла
+		if (vecTracks.size() > 1)
+		{
+			writeTwoBytes(0x0001);
+		}
+		else {
+			writeTwoBytes(0x0000);
+		}
+		// Количество треков
+		writeTwoBytes((uint16_t)vecTracks.size());
+		// Количество тиков на четверть
+		writeTwoBytes((uint16_t)m_nDivision);
 		for (size_t nTrack = 0; nTrack< vecTracks.size(); ++nTrack) {
 			MidiTrack currentTrack = vecTracks[nTrack];
 			uint8_t nPrevStatus = 0;
+			// Заголовок трек-чанка
 			ofs.write(MIDI_TRACK_HEADER, sizeof(uint32_t));
-			fourNibbleIt(currentTrack.vecEvents.size());
+			// Количество событий в треке
+			writeFourBytes(currentTrack.vecEvents.size());
 			if (nTrack == 0) {
-				// Пишем основные мета-данные: темп, размерность такта, синхронизацию
+				// Пишем основные мета-данные: темп, размерность такта, синхронизация
 				if (m_nTempo == 0)
 				{
 					m_nTempo = DEFAULT_TEMPO;
 				}
 				ofs.put(0x00);
-				ofs.put(0xFF);
+				ofs.put((uint8_t)0xFF);
 				ofs.put(0x51);
-				fourNibbleIt(m_nTempo|0x03000000);
+				writeFourBytes(m_nTempo|0x03000000);
+				writeFourBytes(0x00FF5804);
+				writeFourBytes((uint32_t)((m_nTimeSignature.nNumerator<<24))|(uint32_t)((m_nTimeSignature.nDenominator << 16))
+					|(uint32_t)(m_nTimeSignature.nMidiClocks << 8)|(uint32_t)(m_nTimeSignature.n32per24));
+				
 			}
 			for (size_t nEvent = 0; nEvent < currentTrack.vecEvents.size(); ++nEvent)
 			{
 				MidiEvent currentEvent = currentTrack.vecEvents[nEvent];
+
+				// Пишем Variable-Length дельту (переводим в тики из миди-темпа)
 				uint32_t deltaTime = currentEvent.nDelayTime;
 				deltaTime = (uint32_t)m_nDivision*deltaTime*(uint32_t)1000 / m_nTempo;
 				BYTE bytes[4] = { 0 };
-				bytes[0] = (BYTE)((deltaTime >> 21) & 0x7f); 
+				bytes[0] = (BYTE)((deltaTime >> 21) & 0x7f); // MSB
 				bytes[1] = (BYTE)((deltaTime >> 14) & 0x7f);
 				bytes[2] = (BYTE)((deltaTime >> 7) & 0x7f);
-				bytes[3] = (BYTE)(deltaTime & 0x7f);
+				bytes[3] = (BYTE)(deltaTime & 0x7f); // LSB
 				int start = 0;
-				while ((start < 4) && (bytes[start] == 0))  start++;
-
+				while ((start < 4) && (bytes[start] == 0))
+				{
+					start++;
+				}
 				for (int i = start; i < 3; i++) {
 					bytes[i] = bytes[i] | 0x80;
 					ofs.put(bytes[i]);
 				}
 				ofs.put(bytes[3]);
-				// Running status
+
+				// Формируем Running status
 				if (nPrevStatus != currentEvent.nStatus)
 				{
 					ofs.put(currentEvent.nStatus);
-					ofs.put(currentEvent.nDataByteFirst);
-					ofs.put(currentEvent.nDataByteSecond);
 				}
-				else {
-					ofs.put(currentEvent.nDataByteFirst);
-					ofs.put(currentEvent.nDataByteSecond);
-				}
+				ofs.put(currentEvent.nDataByteFirst);
+				ofs.put(currentEvent.nDataByteSecond);
 				nPrevStatus = currentEvent.nStatus;
 			}
-			fourNibbleIt(0x00FF2F00);
+			// End Of Track [meta]
+			writeFourBytes(0x00FF2F00);
 		}
 		ofs.close();
 		return true;

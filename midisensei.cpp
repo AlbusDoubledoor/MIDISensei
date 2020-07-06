@@ -288,6 +288,24 @@ void InitMidiDevices(HWND hDlg,int controlId) {
 	}
 }
 
+// Обновление списка событий
+void RefreshTrackEvents(HWND hDlg) {
+	SendDlgItemMessage(hDlg, IDC_TRACKEVENTS_CB, CB_RESETCONTENT, 0, 0);
+	int trkEventsNum = RecordMidifile.vecTracks[CurrentRecordTrack].vecEvents.size();
+	std::wstring trackEvents;
+	for (int i = 0; i < trkEventsNum; ++i) {
+		MidiEvent nEvent = RecordMidifile.vecTracks[CurrentRecordTrack].vecEvents[i];
+		uint8_t nStatus = nEvent.nStatus;
+		trackEvents.clear();
+		trackEvents = EventTypesMap[(nStatus & 0xF0)];
+		trackEvents += L" | Канал: " + std::to_wstring((nStatus & 0x0F) + 1);
+		trackEvents += L" | Задержка: " + std::to_wstring(nEvent.nDelayTime) + L" ms";
+		trackEvents += L" | Данные: " + std::to_wstring(nEvent.nDataByteFirst);
+		trackEvents += L" | " + std::to_wstring(nEvent.nDataByteSecond);
+		AddStringToCB(hDlg, IDC_TRACKEVENTS_CB, trackEvents.c_str());
+	}
+}
+
 std::atomic<bool> playbackCancel;	// флаг завершения проигрывания
 std::atomic<int> activeTracks;		// количество активных треков
 std::mutex awakeMutex;				// mutex для слипов в потоках
@@ -670,20 +688,9 @@ BOOL CALLBACK RecordFileHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 						break;
 					}
 					CurrentRecordTrack = SendDlgItemMessage(hDlg, IDC_TRACKS_CB, CB_GETCURSEL, 0, 0);
-					SendDlgItemMessage(hDlg, IDC_TRACKEVENTS_CB, CB_RESETCONTENT, 0, 0);
-					int trkEventsNum = RecordMidifile.vecTracks[CurrentRecordTrack].vecEvents.size();
-					std::wstring trackEvents;
-					for (int i = 0; i < trkEventsNum; ++i) {
-						MidiEvent nEvent = RecordMidifile.vecTracks[CurrentRecordTrack].vecEvents[i];
-						uint8_t nStatus = nEvent.nStatus;
-						trackEvents.clear();
-						trackEvents = EventTypesMap[(nStatus & 0xF0)];
-						trackEvents += L" | Канал: " + std::to_wstring((nStatus & 0x0F) + 1);
-						trackEvents += L" | Задержка: " + std::to_wstring(nEvent.nDelayTime) + L" ms";
-						trackEvents += L" | Данные: " + std::to_wstring(nEvent.nDataByteFirst);
-						trackEvents += L" | " + std::to_wstring(nEvent.nDataByteSecond);
-						AddStringToCB(hDlg, IDC_TRACKEVENTS_CB, trackEvents.c_str());
-					}
+					RefreshTrackEvents(hDlg);
+					UINT countCombo = SendDlgItemMessage(hDlg, IDC_TRACKEVENTS_CB, CB_GETCOUNT, 0, 0);
+					SendDlgItemMessage(hDlg, IDC_TRACKEVENTS_CB, CB_SETCURSEL, countCombo-1, 0);
 					break;
 				}
 				case IDC_MIDIOUT_RECORD:
@@ -715,21 +722,19 @@ BOOL CALLBACK RecordFileHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 					uint8_t nDataByteSecond = tmpFieldValue & 0xff;
 
 					uint32_t nDelayTime = GetEditFieldInt(hDlg,IDC_EDIT_DELAYTIME);
+					UINT posInsert = 0;
 					if (RecordMidifile.vecTracks[CurrentRecordTrack].vecEvents.size() == 0) {
 						RecordMidifile.vecTracks[CurrentRecordTrack].vecEvents.push_back({ MidiEvent::Type::Other, nStatus, nDataByteFirst, nDataByteSecond, nDelayTime });
 					}
 					else {
-						UINT posInsert = SendDlgItemMessage(hDlg, IDC_TRACKEVENTS_CB, CB_GETCURSEL, 0, 0);
+						posInsert = SendDlgItemMessage(hDlg, IDC_TRACKEVENTS_CB, CB_GETCURSEL, 0, 0);
 						if (posInsert == -1)
 							posInsert = 0;
+						++posInsert;
 						RecordMidifile.vecTracks[CurrentRecordTrack].vecEvents.insert(RecordMidifile.vecTracks[CurrentRecordTrack].vecEvents.begin() + posInsert, { MidiEvent::Type::Other, nStatus, nDataByteFirst, nDataByteSecond, nDelayTime });
 					}
-					std::wstring trackEvents = EventNames[nEventType];
-					trackEvents += L" | Канал: " + std::to_wstring(nChannel + 1);
-					trackEvents += L" | Задержка: " + std::to_wstring(nDelayTime) + L" ms";
-					trackEvents += L" | Данные: " + std::to_wstring(nDataByteFirst);
-					trackEvents += L" | " + std::to_wstring(nDataByteSecond);
-					AddStringToCB(hDlg, IDC_TRACKEVENTS_CB, trackEvents.c_str());
+					RefreshTrackEvents(hDlg);
+					SendDlgItemMessage(hDlg, IDC_TRACKEVENTS_CB, CB_SETCURSEL, posInsert, 0);
 					break;
 				}
 				case IDC_DELEVENT_BUTTON:
@@ -741,6 +746,7 @@ BOOL CALLBACK RecordFileHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 					UINT eventToRemove = SendDlgItemMessage(hDlg, IDC_TRACKEVENTS_CB, CB_GETCURSEL, 0, 0);
 					RecordMidifile.vecTracks[CurrentRecordTrack].vecEvents.erase(RecordMidifile.vecTracks[CurrentRecordTrack].vecEvents.begin() + eventToRemove);
 					RemoveStringFromCB(hDlg, IDC_TRACKEVENTS_CB, eventToRemove);
+					SendDlgItemMessage(hDlg, IDC_TRACKEVENTS_CB, CB_SETCURSEL, eventToRemove, 0);
 					break;
 				}
 				case IDC_CREATEFILE_BTN:
@@ -751,13 +757,13 @@ BOOL CALLBACK RecordFileHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 						break;
 					}
 					long int bpm = GetEditFieldInt(hDlg, IDC_EDIT_BPM);
-					RecordMidifile.m_nTempo = (uint32_t)(60000000/bpm);
-					if (RecordMidifile.m_nTempo == 0) {
+					if (bpm == 0) {
 						Error(ERR_MSG_TEMPO_NULL);
 						break;
 					}
+					RecordMidifile.m_nTempo = (uint32_t)(60000000/bpm);
 					RecordMidifile.m_nTimeSignature.nNumerator = (uint8_t)GetEditFieldInt(hDlg, IDC_EDIT_TIMESIGNATURE_ENUM);
-					RecordMidifile.m_nTimeSignature.nDenominator = (uint8_t)(2 >> GetEditFieldInt(hDlg, IDC_EDIT_TIMESIGNATURE_DENUM));
+					RecordMidifile.m_nTimeSignature.nDenominator = (uint8_t)(sqrt((uint8_t)GetEditFieldInt(hDlg, IDC_EDIT_TIMESIGNATURE_DENUM)));
 					HWND fnHandle = GetDlgItem(hDlg, IDC_RECORD_FILENAME);
 					int fnLength = GetWindowTextLength(fnHandle) + 1;
 					wchar_t* filename = new wchar_t[fnLength];
