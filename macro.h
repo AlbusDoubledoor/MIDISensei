@@ -47,3 +47,10 @@
 #define str(target) std::to_string(target) 
 // Shell commands
 #define SHELL_COMMAND_OPEN "open"
+// Positionate winAPI
+#define ScreenX GetSystemMetrics(SM_CXSCREEN)
+#define ScreenY GetSystemMetrics(SM_CYSCREEN)
+#define WND_WIDTH 610
+#define WND_HEIGHT 125
+#define CenterX (ScreenX-WND_WIDTH)/2
+#define CenterY (ScreenY-WND_HEIGHT)/2

@@ -164,7 +164,7 @@ public:
 			uint32_t nTrackID = Swap32(n32);
 			ifs.read((char*)&n32, sizeof(uint32_t));
 			uint32_t nTrackLength = Swap32(n32);
-			log << "Track length: " << str(nTracklength) << " bytes";
+			log << "Track length: " << str(nTrackLength) << " bytes" << std::endl;
 
 			bool bEndOfTrack = false;
 			vecTracks.push_back(MidiTrack());
@@ -235,7 +235,7 @@ public:
 					uint8_t nProgramID = ifs.get();
 					vecTracks[nChunk].vecEvents.push_back({ MidiEvent::Type::Other, nStatus,nProgramID,0,nStatusTimeDelta });
 				}
-				// Параметр силы нажатия нот в канале
+				// Параметр силы нажатия нот в канале (для aftertouch)
 				else if ((nStatus & 0xF0) == EventName::VoiceChannelPressure)
 				{
 					nPreviousStatus = nStatus;
@@ -456,7 +456,7 @@ public:
 				writeFourBytes(m_nTempo|0x03000000);
 			}
 
-			nPrevStatus = 0; // Сброс переменной
+			nPrevStatus = 0;
 			// Пробег по событиям трека с записью в поток
 			for (size_t nEvent = 0; nEvent < currentTrack.vecEvents.size(); ++nEvent)
 			{

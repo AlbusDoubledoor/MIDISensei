@@ -52,6 +52,9 @@
 #define IDC_EDIT_TIMESIGNATURE_ENUM     10041
 #define IDC_CANCELTRACK_BTN             10042
 #define IDC_MIDIOUT_RECORD              10043
+#define IDC_TB_KEYB_VOLUME              10045
+#define IDC_TB_PLAY_VOLUME              10046
+#define IDC_TB_RECORD_VOLUME            10047
 #define IDC_STATIC                      -1
 
 // Next default values for new objects
@@ -61,7 +64,7 @@
 #define _APS_NO_MFC                     1
 #define _APS_NEXT_RESOURCE_VALUE        131
 #define _APS_NEXT_COMMAND_VALUE         32775
-#define _APS_NEXT_CONTROL_VALUE         1011
+#define _APS_NEXT_CONTROL_VALUE         1015
 #define _APS_NEXT_SYMED_VALUE           110
 #endif
 #endif

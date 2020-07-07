@@ -432,6 +432,14 @@ BOOL IsByteInput(long int input) {
 	return input >= 0 && input <= 127;
 }
 
+// Инициализация трекбара громкости
+void InitTrackbar(HWND hTrackbar) {
+	SendMessage(hTrackbar, TBM_SETRANGEMIN, false, 0);
+	SendMessage(hTrackbar, TBM_SETRANGEMAX, false, 100);
+	SendMessage(hTrackbar, TBM_SETTICFREQ, false, 1);
+	SendMessage(hTrackbar, TBM_SETPOS, true, 50);
+}
+
 ATOM                MidiSenseiRegisterClass(HINSTANCE hInstance);
 BOOL                InitInstance(HINSTANCE, int);
 LRESULT CALLBACK    WndProc(HWND, UINT, WPARAM, LPARAM);
@@ -534,7 +542,7 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 {
 	hInst = hInstance; // Сохранить маркер экземпляра в глобальной переменной
 	HWND hWnd = CreateWindowW(szWindowClass, szTitle, WS_OVERLAPPEDWINDOW,
-		CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, nullptr, nullptr, hInstance, nullptr);
+		CenterX, CenterY, WND_WIDTH, WND_HEIGHT, nullptr, nullptr, hInstance, nullptr);
 	if (!hWnd)
 	{
 		return FALSE;
@@ -742,9 +750,13 @@ BOOL CALLBACK RecordFileHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 						break;
 					}
 					UINT eventToRemove = SendDlgItemMessage(hDlg, IDC_TRACKEVENTS_CB, CB_GETCURSEL, 0, 0);
+					if (eventToRemove == -1)
+					{
+						break;
+					}
 					RecordMidifile.vecTracks[CurrentRecordTrack].vecEvents.erase(RecordMidifile.vecTracks[CurrentRecordTrack].vecEvents.begin() + eventToRemove);
 					RemoveStringFromCB(hDlg, IDC_TRACKEVENTS_CB, eventToRemove);
-					SendDlgItemMessage(hDlg, IDC_TRACKEVENTS_CB, CB_SETCURSEL, eventToRemove, 0);
+					SendDlgItemMessage(hDlg, IDC_TRACKEVENTS_CB, CB_SETCURSEL, eventToRemove-1, 0);
 					break;
 				}
 				case IDC_CREATEFILE_BTN:
@@ -764,7 +776,7 @@ BOOL CALLBACK RecordFileHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 					if (RecordMidifile.m_nTimeSignature.nNumerator == 0) {
 						RecordMidifile.m_nTimeSignature.nNumerator = DEFAULT_NUMERATOR;
 					}
-					RecordMidifile.m_nTimeSignature.nDenominator = (uint8_t)(sqrt((uint8_t)GetEditFieldInt(hDlg, IDC_EDIT_TIMESIGNATURE_DENUM)));
+					RecordMidifile.m_nTimeSignature.nDenominator = (uint8_t)(log2((uint8_t)GetEditFieldInt(hDlg, IDC_EDIT_TIMESIGNATURE_DENUM)));
 					if (RecordMidifile.m_nTimeSignature.nDenominator == 0) {
 						RecordMidifile.m_nTimeSignature.nDenominator = DEFAULT_DENOMINATOR;
 					}
@@ -942,6 +954,9 @@ BOOL CALLBACK MidiKeyboard(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
 			}
 			// В начале установим 6-ю октаву
 			Octave = SendDlgItemMessage(hDlg,IDC_OCTLIST, CB_SETCURSEL, 6, 0); 
+			// Настройки трекбара громкости
+			HWND hTrackbar = GetDlgItem(hDlg, IDC_TB_KEYB_VOLUME);
+			InitTrackbar(hTrackbar);
 			return TRUE;
 		}
 
