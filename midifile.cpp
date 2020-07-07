@@ -164,6 +164,7 @@ public:
 			uint32_t nTrackID = Swap32(n32);
 			ifs.read((char*)&n32, sizeof(uint32_t));
 			uint32_t nTrackLength = Swap32(n32);
+			log << "Track length: " << str(nTracklength) << " bytes";
 
 			bool bEndOfTrack = false;
 			vecTracks.push_back(MidiTrack());
@@ -306,10 +307,15 @@ public:
 							}
 							break;
 						case MetaSMPTEOffset:
-							log << "SMPTE: H:" << ifs.get() << " M:" << ifs.get() << " S:" << ifs.get() << " FR:" << ifs.get() << " FF:" << ifs.get() << std::endl;
+							log << "SMPTE: H:" << ifs.get();
+							log << " M:" << ifs.get();
+							log << " S:" << ifs.get(); 
+							log << " FR:" << ifs.get();
+							log << " FF:" << ifs.get() << std::endl;
 							break;
 						case MetaTimeSignature:
-							log << "Time Signature: " << ifs.get() << "/" << (2 << ifs.get()) << std::endl;
+							log << "Time Signature: " << ifs.get();
+							log << "/" << (2 << (ifs.get() - 1)) << std::endl;
 							log << "ClocksPerTick: " << ifs.get() << std::endl;
 
 							// MIDI бит - 24 тика, сколько 32-ых будет в одном бите
@@ -351,7 +357,7 @@ public:
 	}
 
 	bool ExplodeFile(std::wstring sFileName) {
-		std::ofstream ofs,log;
+		std::ofstream ofs;
 		ofs.open(sFileName, std::fstream::out | std::ios_base::binary);
 		if (!ofs.is_open())
 			return false;
@@ -385,15 +391,61 @@ public:
 		writeTwoBytes((uint16_t)vecTracks.size());
 		// Количество тиков на четверть
 		writeTwoBytes((uint16_t)m_nDivision);
+		// Пробег по трекам
 		for (size_t nTrack = 0; nTrack< vecTracks.size(); ++nTrack) {
 			MidiTrack currentTrack = vecTracks[nTrack];
 			uint8_t nPrevStatus = 0;
+
 			// Заголовок трек-чанка
 			ofs.write(MIDI_TRACK_HEADER, sizeof(uint32_t));
-			// Количество событий в треке
-			writeFourBytes(currentTrack.vecEvents.size());
+
+			// Размер трека
+			uint32_t trackSize = 0;
+			if (nTrack == 0)
+			{
+				trackSize += 15; // Мета-эвенты
+			}
+
+			trackSize += 4; // End of track 4 байта
+
+			// Подсчёт длины трека в байтах (пробег без записи в поток)
+			for (size_t nEvent = 0; nEvent < currentTrack.vecEvents.size(); ++nEvent)
+			{
+				MidiEvent currentEvent = currentTrack.vecEvents[nEvent];
+				uint32_t deltaTime = currentEvent.nDelayTime;
+				deltaTime = (uint32_t)m_nDivision * deltaTime * (uint32_t)1000 / m_nTempo;
+				BYTE bytes[4] = { 0 };
+				bytes[0] = (BYTE)((deltaTime >> 21) & 0x7f); // MSB
+				bytes[1] = (BYTE)((deltaTime >> 14) & 0x7f);
+				bytes[2] = (BYTE)((deltaTime >> 7) & 0x7f);
+				bytes[3] = (BYTE)(deltaTime & 0x7f); // LSB
+				int start = 0;
+				while ((start < 4) && (bytes[start] == 0))
+				{
+					start++;
+				}
+				for (int i = start; i < 3; i++) {
+					++trackSize; // Байты VL
+				}
+				++trackSize; // Младший байт VL
+				if (nPrevStatus != currentEvent.nStatus)
+				{
+					++trackSize; // Статус-байт
+				}
+				++trackSize; // Байт 1 данных
+				if (!((currentEvent.nStatus & 0xF0) == EventName::VoiceProgramChange || (currentEvent.nStatus & 0xF0) == EventName::VoiceChannelPressure))
+				{
+					++trackSize; // Байт 2 данных
+				}
+				nPrevStatus = currentEvent.nStatus;
+			}
+			writeFourBytes(trackSize);
+
 			if (nTrack == 0) {
 				// Пишем основные мета-данные: темп, размерность такта, синхронизация
+				writeFourBytes(0x00FF5804);
+				writeFourBytes((uint32_t(m_nTimeSignature.nNumerator) << 24) | (uint32_t(m_nTimeSignature.nDenominator) << 16)
+					| (uint32_t(m_nTimeSignature.nMidiClocks) << 8) | (uint32_t)(m_nTimeSignature.n32per24));
 				if (m_nTempo == 0)
 				{
 					m_nTempo = DEFAULT_TEMPO;
@@ -402,11 +454,10 @@ public:
 				ofs.put((uint8_t)0xFF);
 				ofs.put(0x51);
 				writeFourBytes(m_nTempo|0x03000000);
-				writeFourBytes(0x00FF5804);
-				writeFourBytes((uint32_t)((m_nTimeSignature.nNumerator<<24))|(uint32_t)((m_nTimeSignature.nDenominator << 16))
-					|(uint32_t)(m_nTimeSignature.nMidiClocks << 8)|(uint32_t)(m_nTimeSignature.n32per24));
-				
 			}
+
+			nPrevStatus = 0; // Сброс переменной
+			// Пробег по событиям трека с записью в поток
 			for (size_t nEvent = 0; nEvent < currentTrack.vecEvents.size(); ++nEvent)
 			{
 				MidiEvent currentEvent = currentTrack.vecEvents[nEvent];
@@ -436,7 +487,10 @@ public:
 					ofs.put(currentEvent.nStatus);
 				}
 				ofs.put(currentEvent.nDataByteFirst);
-				ofs.put(currentEvent.nDataByteSecond);
+				if (!((currentEvent.nStatus & 0xF0) == EventName::VoiceProgramChange || (currentEvent.nStatus & 0xF0) == EventName::VoiceChannelPressure))
+				{
+					ofs.put(currentEvent.nDataByteSecond);
+				}
 				nPrevStatus = currentEvent.nStatus;
 			}
 			// End Of Track [meta]

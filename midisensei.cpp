@@ -266,12 +266,10 @@ int OpenDevices(HWND hDlg,int controlId) {
 		Error(ERR_MSG_MIDI___DEVICE);
 		return FALSE;
 	}
-	switch (controlId) {
-		case IDC_MIDIOUT_PLAY:
-		case IDC_MIDIOUT_RECORD:
-			Patch = 0;
+	
+	if (controlId == IDC_MIDIOUT) {
+		PatchChange(); // Выберем текущий тембр
 	}
-	PatchChange();               // Выберем текущий тембр
 	return TRUE;
 }
 
@@ -763,7 +761,13 @@ BOOL CALLBACK RecordFileHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 					}
 					RecordMidifile.m_nTempo = (uint32_t)(60000000/bpm);
 					RecordMidifile.m_nTimeSignature.nNumerator = (uint8_t)GetEditFieldInt(hDlg, IDC_EDIT_TIMESIGNATURE_ENUM);
+					if (RecordMidifile.m_nTimeSignature.nNumerator == 0) {
+						RecordMidifile.m_nTimeSignature.nNumerator = DEFAULT_NUMERATOR;
+					}
 					RecordMidifile.m_nTimeSignature.nDenominator = (uint8_t)(sqrt((uint8_t)GetEditFieldInt(hDlg, IDC_EDIT_TIMESIGNATURE_DENUM)));
+					if (RecordMidifile.m_nTimeSignature.nDenominator == 0) {
+						RecordMidifile.m_nTimeSignature.nDenominator = DEFAULT_DENOMINATOR;
+					}
 					HWND fnHandle = GetDlgItem(hDlg, IDC_RECORD_FILENAME);
 					int fnLength = GetWindowTextLength(fnHandle) + 1;
 					wchar_t* filename = new wchar_t[fnLength];

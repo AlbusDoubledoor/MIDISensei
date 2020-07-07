@@ -11,6 +11,8 @@
 // Default tempo params
 #define DEFAULT_TEMPO 500000
 #define DEFAULT_BPM 120
+#define DEFAULT_NUMERATOR 4
+#define DEFAULT_DENOMINATOR 4
 // MIDI Format
 #define MIDI_FILE_HEADER "MThd"
 #define MIDI_TRACK_HEADER "MTrk"
