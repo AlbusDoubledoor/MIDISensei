@@ -35,6 +35,7 @@
 #define INFO_MSG_DRUMS L"Барабаны работают на октавах 2-4"
 #define INFO_MSG_REPORT L"Файл отчёта отсутствует\nЗагрузите файл"
 #define INFO_MSG_FILE_LOADED L"Файл загружен"
+#define INFO_MSG_FILE_CREATED L"Файл создан"
 // Titles
 #define MB_TITLE___ERROR L"Ошибка"
 #define MB_TITLE___INFO L"Информация"

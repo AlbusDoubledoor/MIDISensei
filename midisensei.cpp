@@ -18,6 +18,8 @@ BOOL LoadStaged = FALSE;						// Статус загрузки файла (фа�
 BOOL PlaybackStaged = FALSE;					// Статус подготовки Playback (файл проигрывается)
 BOOL LoadMidiError = FALSE;						// Статус загрузки midi-файла
 BOOL KeyboardWindowOpened = FALSE;				// Статус - открыто немодальное диалоговое окно с клавиатурой
+UINT Volume = 255;								// Громкость MIDI устройства				
+UINT Pitch = 8192;								// Высота тона
 
 
 // Константы:
@@ -253,6 +255,14 @@ void CloseDevices(void) {
 	}
 }
 
+// Установка высоты тона
+void SetPitch() {
+	BYTE msb = (Pitch >> 7) & 0x7F;
+	BYTE lsb = Pitch & 0x7F;
+	for (BYTE channel = 0; channel < 15; ++channel) {
+		MidiOut((msb << 16) | (lsb << 8) | (0xE0 | channel));
+	}
+}
 // Открывание устройств
 int OpenDevices(HWND hDlg,int controlId) {
 	MMRESULT Res;
@@ -267,6 +277,8 @@ int OpenDevices(HWND hDlg,int controlId) {
 		return FALSE;
 	}
 	
+	midiOutSetVolume(Out, (Volume << 8) | Volume); // Установим громкость
+	SetPitch(); // Установим высоту тону
 	if (controlId == IDC_MIDIOUT) {
 		PatchChange(); // Выберем текущий тембр
 	}
@@ -413,7 +425,7 @@ void PlaybackCancel() {
 
 
 // Получение значения числового поля
-long int GetEditFieldInt(HWND hDlg,int controlId) {
+long int GetEditFieldInt(const HWND & hDlg,int controlId) {
 	HWND fieldHandle = GetDlgItem(hDlg, controlId);
 	int fieldLen = GetWindowTextLength(fieldHandle)+1;
 	if (fieldLen == 1) {
@@ -433,11 +445,50 @@ BOOL IsByteInput(long int input) {
 }
 
 // Инициализация трекбара громкости
-void InitTrackbar(HWND hTrackbar) {
+void InitTrackbarVolume(const HWND&  hTrackbar) {
 	SendMessage(hTrackbar, TBM_SETRANGEMIN, false, 0);
 	SendMessage(hTrackbar, TBM_SETRANGEMAX, false, 100);
 	SendMessage(hTrackbar, TBM_SETTICFREQ, false, 1);
-	SendMessage(hTrackbar, TBM_SETPOS, true, 50);
+	UINT vTrackbar = UINT((double)Volume / 2.55);
+	SendMessage(hTrackbar, TBM_SETPOS, true, vTrackbar);
+}
+
+// Инициализация трекбара высоты тона
+void InitTrackbarPitch(const HWND& hTrackbar) {
+	SendMessage(hTrackbar, TBM_SETRANGEMIN, false, 0);
+	SendMessage(hTrackbar, TBM_SETRANGEMAX, false, 16383);
+	SendMessage(hTrackbar, TBM_SETTICFREQ, false, 1);
+	SendMessage(hTrackbar, TBM_SETPOS, true, 8192);
+	Pitch = 8192;
+}
+
+// Обновление значение показателя высоты тона
+void RefreshPitchIndicator(HWND hDlg, int controlId) {
+	std::wstring wPitchValue = wstr(Pitch);
+	const wchar_t* wcPitchValue = wPitchValue.c_str();
+	SendDlgItemMessage(hDlg, controlId, WM_SETTEXT, 0, (LPARAM)wcPitchValue);
+}
+
+// Обработчик трекбара громкости
+void TrackbarVolumeHandler(HWND hDlg,int controlId) {
+		UINT vTrackbar = SendDlgItemMessage(hDlg, controlId, TBM_GETPOS, 0, 0);
+		vTrackbar = UINT((double)vTrackbar * 2.55);
+		Volume = vTrackbar;
+		if (!Out) {
+			return;
+		}
+		midiOutSetVolume(Out, (vTrackbar << 8) | vTrackbar);
+}
+
+// Обработчик трекбара высоты тона
+void TrackbarPitchHandler(HWND hDlg, int controlId) {
+	UINT vTrackbar = SendDlgItemMessage(hDlg, controlId, TBM_GETPOS, 0, 0);
+	Pitch = vTrackbar;
+	RefreshPitchIndicator(hDlg,IDC_EDIT_RO_PITCH);
+	if (!Out) {
+		return;
+	}
+	SetPitch();
 }
 
 ATOM                MidiSenseiRegisterClass(HINSTANCE hInstance);
@@ -640,6 +691,8 @@ BOOL CALLBACK RecordFileHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 		{
 			// Инициализация устройств
 			InitMidiDevices(hDlg, IDC_MIDIOUT_RECORD);
+			// Установка стандартного тона
+			Pitch = 8192;
 			// Инициализация файла
 		    RecordMidifile = MidiFile();
 			// Заполняем список каналов
@@ -656,6 +709,14 @@ BOOL CALLBACK RecordFileHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 				AddStringToCB(hDlg, IDC_EVENTS_CB, EventNames[i]);
 			}
 			SendDlgItemMessage(hDlg, IDC_EVENTS_CB, CB_SETCURSEL, 0, 0);
+			// Инициализация трекбара громкости
+			HWND hTrackbar = GetDlgItem(hDlg, IDC_TB_RECORD_VOLUME);
+			InitTrackbarVolume(hTrackbar);
+			break;
+		}
+		case WM_HSCROLL:
+		{
+			TrackbarVolumeHandler(hDlg, IDC_TB_RECORD_VOLUME);
 			break;
 		}
 		case WM_COMMAND:
@@ -663,6 +724,7 @@ BOOL CALLBACK RecordFileHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 				case IDOK:
 				case IDCANCEL:
 					{
+						PlaybackCancel();
 						EndDialog(hDlg, LOWORD(lParam));
 						return TRUE;
 					}
@@ -789,6 +851,9 @@ BOOL CALLBACK RecordFileHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 					{
 						Error(ERR_MSG_LOAD___OTHER);
 					}
+					else {
+						InfoMessage(INFO_MSG_FILE_CREATED);
+					}
 					delete[] filename;
 					break;
 				}
@@ -815,6 +880,26 @@ BOOL CALLBACK RecordFileHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 					PlaybackCancel();
 					break;
 				}
+				case IDC_RESET_RECORD:
+				{
+					PlaybackCancel();
+					RecordMidifile = MidiFile();
+					RecordMidifile.vecTracks.push_back(MidiTrack());
+					CurrentRecordTrack = 0;
+					RefreshTrackEvents(hDlg);
+					SendDlgItemMessage(hDlg, IDC_TRACKS_CB, CB_RESETCONTENT, 0, 0);
+					AddStringToCB(hDlg, IDC_TRACKS_CB, wstr(1).c_str());
+					SendDlgItemMessage(hDlg, IDC_TRACKS_CB, CB_SETCURSEL, 0, 1);
+					SendDlgItemMessage(hDlg, IDC_EDIT_BPM, WM_SETTEXT, 0, 0);
+					SendDlgItemMessage(hDlg, IDC_EDIT_TIMESIGNATURE_ENUM, WM_SETTEXT,0, 0);
+					SendDlgItemMessage(hDlg, IDC_EDIT_TIMESIGNATURE_DENUM, WM_SETTEXT, 0, 0);
+					SendDlgItemMessage(hDlg, IDC_EDIT_TICKSPERQUARTER, WM_SETTEXT, 0, 0);
+					SendDlgItemMessage(hDlg, IDC_EDIT_DELAYTIME, WM_SETTEXT, 0, 0);
+					SendDlgItemMessage(hDlg, IDC_EDIT_DATABYTE_FIRST, WM_SETTEXT, 0, 0);
+					SendDlgItemMessage(hDlg, IDC_EDIT_DATABYTE_SECOND, WM_SETTEXT, 0, 0);
+					SendDlgItemMessage(hDlg, IDC_RECORD_FILENAME, WM_SETTEXT, 0, 0);
+					break;
+				}
 			}
 			break;
 	}
@@ -831,11 +916,21 @@ BOOL CALLBACK PlayFileHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPa
 	case WM_INITDIALOG: {
 		// Инициализация списка MIDI-устройств
 		InitMidiDevices(hDlg,IDC_MIDIOUT_PLAY);
+		// Установка стандартного тона
+		Pitch = 8192;
+		// Инициализация трекбара громкости
+		HWND hTrackbar = GetDlgItem(hDlg, IDC_TB_PLAY_VOLUME);
+		InitTrackbarVolume(hTrackbar);
 		// Инициализация переменных состояния
 		playbackCancel.store(false);
 		PlaybackStaged = FALSE;
 		LoadStaged = FALSE;
 		return TRUE;
+	}
+	case WM_HSCROLL:
+	{
+		TrackbarVolumeHandler(hDlg, IDC_TB_PLAY_VOLUME);
+		break;
 	}
 	case WM_COMMAND:
 		{
@@ -956,10 +1051,24 @@ BOOL CALLBACK MidiKeyboard(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
 			Octave = SendDlgItemMessage(hDlg,IDC_OCTLIST, CB_SETCURSEL, 6, 0); 
 			// Настройки трекбара громкости
 			HWND hTrackbar = GetDlgItem(hDlg, IDC_TB_KEYB_VOLUME);
-			InitTrackbar(hTrackbar);
+			InitTrackbarVolume(hTrackbar);
+			// Настройки трекбара питча
+			hTrackbar = GetDlgItem(hDlg, IDC_TB_PITCH);
+			InitTrackbarPitch(hTrackbar);
+			RefreshPitchIndicator(hDlg, IDC_EDIT_RO_PITCH);
 			return TRUE;
 		}
-
+		case WM_HSCROLL:
+		{
+			if ((HWND)lParam == GetDlgItem(hDlg, IDC_TB_KEYB_VOLUME))
+			{
+				TrackbarVolumeHandler(hDlg, IDC_TB_KEYB_VOLUME);
+			}
+			else {
+				TrackbarPitchHandler(hDlg, IDC_TB_PITCH);
+			}
+			break;
+		}
 		case WM_COMMAND:
 		{
 			switch (controlId) {
@@ -970,6 +1079,27 @@ BOOL CALLBACK MidiKeyboard(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
 					EndDialog(hDlg, LOWORD(wParam));
 					KeyboardWindowOpened = FALSE;
 					return TRUE;
+				}
+				case IDC_RESET_PITCH:
+				{
+					Pitch = 8192;
+					if (Out)
+					{
+						SetPitch();
+					}
+					SendDlgItemMessage(hDlg, IDC_TB_PITCH, TBM_SETPOS, true, 8192);
+					RefreshPitchIndicator(hDlg,IDC_EDIT_RO_PITCH);
+					break;
+				}
+				case IDM_KEYB_CONTROL_INFO:
+				{
+					DialogBox(hInst, MAKEINTRESOURCE(IDD_KEYB_CONTROL_INFO), hDlg, DefaultDlgHandler);
+					break;
+				}
+				case IDM_ABOUT:
+				{
+					DialogBox(hInst, MAKEINTRESOURCE(IDD_ABOUTBOX), hDlg, DefaultDlgHandler);
+					break;
 				}
 				case IDC_RESET:
 				{

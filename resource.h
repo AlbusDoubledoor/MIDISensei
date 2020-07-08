@@ -12,9 +12,10 @@
 #define IDI_MIDISENSEI                  107
 #define IDI_SMALL                       108
 #define IDC_MIDISENSEI                  109
+#define IDC_KEYBOARD_MENU               110
 #define IDR_MAINFRAME                   128
+#define IDD_KEYB_CONTROL_INFO           131
 #define IDC_EDIT_BPM                    1004
-#define IDC_EDIT_TIMESIGNATURE          1006
 #define IDC_ADDTRACK_BTN                1007
 #define IDC_DELTRACK_BTN                1008
 #define IDC_RESET_RECORD                1010
@@ -26,6 +27,7 @@
 #define IDC_EDIT_DATABYTE_FIRST         1016
 #define IDC_EDIT_DATABYTE_SECOND        1017
 #define IDC_EDIT_TICKSPERQUARTER        1018
+#define IDC_EDIT_RO_PITCH               1020
 #define IDM_OPENKEYBOARD                10001
 #define IDM_PLAYFILE                    10003
 #define IDD_PLAYFILEDIALOG              10005
@@ -43,7 +45,6 @@
 #define IDM_RECORDFILE                  10029
 #define IDD_RECORDFILEDIALOG            10031
 #define IDC_TRACKS_CB                   10034
-#define IDM_CONTROLS                    10035
 #define IDC_EVENTS_CB                   10036
 #define IDC_TRACKEVENTS_CB              10037
 #define IDC_CHANNELS_CB                 10038
@@ -55,6 +56,9 @@
 #define IDC_TB_KEYB_VOLUME              10045
 #define IDC_TB_PLAY_VOLUME              10046
 #define IDC_TB_RECORD_VOLUME            10047
+#define IDC_TB_PITCH                    10049
+#define IDC_RESET_PITCH                 10051
+#define IDM_KEYB_CONTROL_INFO           32776
 #define IDC_STATIC                      -1
 
 // Next default values for new objects
@@ -62,9 +66,9 @@
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NO_MFC                     1
-#define _APS_NEXT_RESOURCE_VALUE        131
-#define _APS_NEXT_COMMAND_VALUE         32775
-#define _APS_NEXT_CONTROL_VALUE         1015
+#define _APS_NEXT_RESOURCE_VALUE        132
+#define _APS_NEXT_COMMAND_VALUE         32777
+#define _APS_NEXT_CONTROL_VALUE         1021
 #define _APS_NEXT_SYMED_VALUE           110
 #endif
 #endif
