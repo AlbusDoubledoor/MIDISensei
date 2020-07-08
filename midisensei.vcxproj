@@ -154,6 +154,7 @@
     <ResourceCompile Include="midisensei.rc" />
   </ItemGroup>
   <ItemGroup>
+    <Image Include="control.bmp" />
     <Image Include="midisensei.ico" />
     <Image Include="small.ico" />
   </ItemGroup>

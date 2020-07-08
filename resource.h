@@ -15,6 +15,7 @@
 #define IDC_KEYBOARD_MENU               110
 #define IDR_MAINFRAME                   128
 #define IDD_KEYB_CONTROL_INFO           131
+#define IDB_CONTROL_INFO                136
 #define IDC_EDIT_BPM                    1004
 #define IDC_ADDTRACK_BTN                1007
 #define IDC_DELTRACK_BTN                1008
@@ -66,7 +67,7 @@
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NO_MFC                     1
-#define _APS_NEXT_RESOURCE_VALUE        132
+#define _APS_NEXT_RESOURCE_VALUE        137
 #define _APS_NEXT_COMMAND_VALUE         32777
 #define _APS_NEXT_CONTROL_VALUE         1021
 #define _APS_NEXT_SYMED_VALUE           110

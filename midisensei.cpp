@@ -541,8 +541,14 @@ int APIENTRY wWinMain(HINSTANCE hInstance,
 			int VK = wParam;              // Код клавиши
 			BOOL repeatFlag = (lParam & 0x40000000); // Признак повторения
 			// Ищем клавишу в таблице соответствия
-			char* p = strchr(KeyToNote, tolower(VK));
-			if (p) {
+			int p = -1;
+			for (int i = 0; i < 24; ++i) {
+				if (tolower(VK) == KeyToNote[i]) {
+					p = i;
+					break;
+				}
+			}
+			if (p != -1) {
 				if (!repeatFlag) {             // Повторение пропускаем
 					// MIDI-сообщения по событию ноты:
 					// 9c nn vv - нажать
@@ -551,10 +557,10 @@ int APIENTRY wWinMain(HINSTANCE hInstance,
 					// nn - номер ноты
 					// vv - скорость нажатия (0 - отпускание)
 					if (Msg == WM_KEYDOWN)
-						MidiOutChannel(0x90, BYTE(Octave * 12 + (UINT)p), BYTE(127));
+						MidiOutChannel(0x90, BYTE(Octave * 12 + p), BYTE(127));
 				}
 				if (Msg == WM_KEYUP)
-					MidiOutChannel(0x80, BYTE(Octave * 12 + (UINT)p), BYTE(0));
+					MidiOutChannel(0x80, BYTE(Octave * 12 + p), BYTE(0));
 				continue;
 			}
 		}

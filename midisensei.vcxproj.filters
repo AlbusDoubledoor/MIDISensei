@@ -51,5 +51,8 @@
     <Image Include="midisensei.ico">
       <Filter>Файлы ресурсов</Filter>
     </Image>
+    <Image Include="control.bmp">
+      <Filter>Файлы ресурсов</Filter>
+    </Image>
   </ItemGroup>
 </Project>
